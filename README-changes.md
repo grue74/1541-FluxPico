@@ -186,8 +186,8 @@ end there). VICE loads a converted *Law of the West* image into the game; the VI
 181 G64 images gives the same result as before.
 
 `test_disks/` has `.den` files for both PAL sides of *Law of the West*. The rule depends on the
-loader: derive it from the loader code or from VICE. Connecting the density lines to the Pico
-(hardware change plus firmware) is described in `doc/density-select-mod.pdf`.
+loader: derive it from the loader code or from VICE. 1541-FluxPico replaces this by feeding the flux
+stream into the drive's own gate array (`doc/bitstream-plan.md`, `doc/flux-mod-1541-II.pdf`).
 
 Note: *Law of the West* does not load with the S-JiffyDOS drive ROM at all (also not in VICE):
 RapidLok's decryption depends on scratch bytes of the stock DOS GCR decoder.
@@ -224,8 +224,8 @@ when it changes), `LATE`, `WRITE`, `STEP?`, `MOTOR`, `SOE` (on-periods of 1 ms o
 * **Density select lines are not connected to the Pico.** The decoder clock is assumed to match the
   density of the track. Loaders that read a track at another density (RapidLok: key track 36 at
   density 3; A View To A Kill tracks 37–41, Rally Speedway track 36) get the bytes of the recorded
-  rate. Workaround: a `.den` file per image (section 8). Proper fix: hardware change plus firmware,
-  see `doc/density-select-mod.pdf`.
+  rate. Workaround: a `.den` file per image (section 8). Proper fix: the flux mod,
+  see `doc/flux-mod-1541-II.pdf`.
 * Weak bits are random, but the number of bits read stays fixed.
 * The track number on the display is still 2 digits; a half-track is shown with `+`.
 

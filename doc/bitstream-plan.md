@@ -51,7 +51,7 @@ still sees the gate array's outputs: SYNC (GPIO2), BYTE READY (GPIO22) and port 
 
 ## Phase 1 - modification (PCB v1.7 + 1541-II)
 
-Step-by-step with pictures: `doc/flux-mod-1541-II.pdf` (generator `tools/density_pdf/make_flux_pdf.py`).
+Step-by-step with pictures: `doc/flux-mod-1541-II.pdf` (generator `tools/mod_pdf/make_flux_pdf.py`).
 The 1541-II has the **40-pin 251828-03** gate array: CLR = pin 31, OE (MODE) = pin 19, SOE = pin 39,
 BYTE = pin 40 (the schematic shows the 42-pin numbering, CLR = 33).
 
@@ -106,6 +106,3 @@ GPIO8-15, and the old firmware drives them too.
 ## Fork and name
 
 1541-FluxPico, forked from fook42/1541-rePico (GPL-3.0); see README.
-
-Superseded: `doc/density-select-mod.pdf` describes reading DS0/DS1 into the Pico. In flux mode the
-gate array gets DS0/DS1 directly; only its SOE_GA cut is reused.

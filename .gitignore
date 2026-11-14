@@ -30,3 +30,6 @@ firmware/pico-sdk/
 picotool.exe
 putty.log
 hardware/.history/
+__pycache__/
+*.pyc
+tools/mod_pdf/_tmp/

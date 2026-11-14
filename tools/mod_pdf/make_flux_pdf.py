@@ -20,8 +20,8 @@ from figs import B, View, _xy, board_drawing
 
 REPO = r'E:\GitHub\1541-rePico'
 OUT = os.environ.get('PDF_OUT', os.path.join(REPO, 'doc', 'flux-mod-1541-II.pdf'))
-TMP = os.environ.get('PDF_TMP', os.path.join(REPO, 'tools', 'density_pdf', '_tmp'))
-PHOTO_DRIVE = os.path.join(REPO, 'doc', 'pictures', '1541-II_with_rePico.jpg')
+TMP = os.environ.get('PDF_TMP', os.path.join(REPO, 'tools', 'mod_pdf', '_tmp'))
+PHOTO_BOARD = os.path.join(REPO, 'doc', 'pictures', 'flux_mod_board.jpg')
 
 # strong, distinct colours (also readable when printed in grey)
 C_TEXT = colors.HexColor('#111111')
@@ -254,25 +254,92 @@ def fig_before_after():
 
 # --- photo with notes -------------------------------------------------------------
 
-def annotated_photo():
+# pin centres in the user's photo (768 x 1024, board upside down: all print reads upside down)
+GA_TOP_Y, GA_BOT_Y, GA_X_LEFT, GA_X_RIGHT = 422, 503, 357, 613   # gate array U10 leg rows
+SO_TOP_Y, SO_BOT_Y, SO_X_LEFT, SO_X_RIGHT = 547, 629, 354, 620   # VIA socket U8 holes
+
+
+def photo_pin(n, top_y, bot_y, xl, xr):
+    """board upside down: pin 1 is top right, pins 1-20 run right to left along the top row,
+    pins 21-40 left to right along the bottom row"""
+    step = (xr - xl) / 19.0
+    if n <= 20:
+        return xr - (n - 1) * step, top_y
+    return xl + (n - 21) * step, bot_y
+
+
+def annotated_photos():
+    """overview of the user's board and a zoom of the gate array with the pins marked"""
     os.makedirs(TMP, exist_ok=True)
-    out = os.path.join(TMP, 'drive_annotated.jpg')
-    im = PImage.open(PHOTO_DRIVE).convert('RGB')
-    dr = ImageDraw.Draw(im)
-    f = ImageFont.truetype(r'C:\Windows\Fonts\arialbd.ttf', 78)
+    src = PImage.open(PHOTO_BOARD).convert('RGB')
+    k = 3                                               # work at 3x for clean marks
+    big = src.resize((src.width * k, src.height * k), PImage.LANCZOS)
+    dr = ImageDraw.Draw(big)
+    f = ImageFont.truetype('C:/Windows/Fonts/arialbd.ttf', 64)
 
-    def mark(box, col, label, tx, ty):
-        dr.rectangle(box, outline=col, width=14)
-        tw = dr.textlength(label, font=f)
-        dr.rectangle((tx - 14, ty - 10, tx + tw + 14, ty + 96), fill='white', outline=col, width=8)
-        dr.text((tx, ty), label, fill=col, font=f)
+    def label(x, y, txt, col):
+        tw = dr.textlength(txt, font=f)
+        dr.rectangle((x - 10, y - 6, x + tw + 10, y + 74), fill='white', outline=col, width=6)
+        dr.text((x, y), txt, fill=col, font=f)
 
-    mark((510, 60, 820, 690), (200, 0, 0), 'ROM 251968 - not this chip', 870, 90)
-    mark((2080, 1220, 2330, 1520), (90, 90, 90), 'U12 read amplifier', 2020, 1040)
-    mark((930, 690, 1975, 1740), (0, 110, 0), 'gate array: under the rePico', 960, 1600)
-    im.thumbnail((1800, 1800))
-    im.save(out, quality=88)
-    return out, im.size
+    # overview
+    ov = big.copy()
+    do = ImageDraw.Draw(ov)
+    fo = ImageFont.truetype('C:/Windows/Fonts/arialbd.ttf', 70)
+
+    def olabel(x, y, txt, col):
+        tw = do.textlength(txt, font=fo)
+        do.rectangle((x - 12, y - 8, x + tw + 12, y + 82), fill='white', outline=col, width=7)
+        do.text((x, y), txt, fill=col, font=fo)
+    do.rectangle((335 * k, 405 * k, 640 * k, 520 * k), outline=(200, 0, 0), width=14)
+    olabel(60 * k, 360 * k, 'gate array 251828 (U10)', (200, 0, 0))
+    do.rectangle((335 * k, 525 * k, 640 * k, 650 * k), outline=(0, 90, 220), width=14)
+    olabel(90 * k, 655 * k, 'VIA socket U8 (rePico)', (0, 90, 220))
+    do.rectangle((485 * k, 280 * k, 610 * k, 385 * k), outline=(110, 110, 110), width=10)
+    olabel(470 * k, 230 * k, 'U12', (110, 110, 110))
+    out1 = os.path.join(TMP, 'board_overview.jpg')
+    ov.resize((src.width * 2, src.height * 2), PImage.LANCZOS).save(out1, quality=90)
+
+    # zoom: gate array + VIA socket with pin numbers
+    red, blue, orange, grey = (210, 0, 0), (0, 90, 220), (220, 110, 0), (70, 70, 70)
+
+    def ring(n, rows, col, r=8, w=5):
+        x, y = photo_pin(n, *rows)
+        dr.ellipse(((x - r) * k, (y - r) * k, (x + r) * k, (y + r) * k), outline=col, width=w)
+        return x, y
+
+    def centred(x, y, txt, col):
+        label(x * k - dr.textlength(txt, font=f) / 2, y * k, txt, col)
+
+    ga = (GA_TOP_Y, GA_BOT_Y, GA_X_LEFT, GA_X_RIGHT)
+    so = (SO_TOP_Y, SO_BOT_Y, SO_X_LEFT, SO_X_RIGHT)
+    # gate array: top row labels above the chip, bottom row labels in the gap above the socket
+    x, y = ring(1, ga, grey)
+    centred(x - 6, y - 38, '1', grey)
+    x, y = ring(19, ga, blue)
+    centred(x + 10, y - 38, '19 = A', blue)
+    ring(30, ga, grey, 7, 4)
+    ring(32, ga, grey, 7, 4)
+    x, y = ring(31, ga, red, 10, 8)
+    centred(x, y + 13, '31 CUT', red)
+    x, y = ring(39, ga, orange)
+    centred(x - 4, y + 13, '39 = B', orange)
+    # bracket under the bottom row: legs 21..31 counted from the left
+    x21, yb = photo_pin(21, *ga)
+    dr.line((x21 * k, (yb - 13) * k, (x - 0) * k, (yb - 13) * k), fill=red, width=5)
+    for xx in [photo_pin(n, *ga)[0] for n in range(21, 32)]:
+        dr.line((xx * k, (yb - 16) * k, xx * k, (yb - 10) * k), fill=red, width=4)
+    # VIA socket: labels inside the empty socket window
+    x, y = ring(1, so, blue)
+    centred(x - 10, y + 12, 'VIA 1', blue)
+    x, y = ring(19, so, blue)
+    centred(x + 12, y + 12, 'VIA 19', blue)
+    x, y = ring(39, so, orange)
+    centred(x - 14, y - 36, 'VIA 39', orange)
+    zoom = big.crop((325 * k, 360 * k, 660 * k, 690 * k))
+    out2 = os.path.join(TMP, 'board_zoom.jpg')
+    zoom.save(out2, quality=90)
+    return (out1, ov.size), (out2, zoom.size)
 
 
 # --- document -------------------------------------------------------------------------
@@ -316,36 +383,46 @@ def build():
     s.append(P('If something does not match a picture or a meter check: stop and send a photo. A wrong pin '
                'is easy to fix before soldering and hard after.', NOTE))
     s.append(P('Step 1: find the gate array', H2))
-    path, (pw, ph) = annotated_photo()
-    s.append(Image(path, width=165 * mm, height=165 * mm * ph / pw))
-    s.append(P('Figure 1: a 1541-II with the rePico board. The 28-pin chip marked 251968 is the DOS ROM, not '
-               'the gate array. The gate array and the second VIA are most likely under the rePico board.', CAP))
+    (p1, (w1, h1)), (p2, (w2, h2)) = annotated_photos()
+    s.append(P('Pull the rePico board out of the VIA socket. The gate array is the 40-pin chip printed '
+               '<b>251828-03</b> (U10), right next to the VIA socket (U8). On this board it is soldered in, '
+               'not in a socket.', BODY))
 
     s.append(PageBreak())
-    s.append(P('1. Pull the rePico board out of the VIA socket. You now see the 40-pin VIA socket and, next to it, '
-               'more chips. The gate array is the 40-pin chip printed <b>251828</b> (U10 in the schematic). The '
-               'other 40-pin chips are the 6502 CPU and a 6522 VIA. Read the print on the chips.', STEP))
-    s.append(P('2. Turn the drive board so that the gate array\'s <b>notch</b> points away from you (figure 2). '
-               'Pin 1 is then top left; pins 1-20 go down the left side, pins 21-40 come back up the right side.',
-               STEP))
+    s.append(Image(p1, width=120 * mm, height=120 * mm * h1 / w1))
+    s.append(P('Figure 1: your 1541-II board, as in your photo (the board print is upside down here). Red: the '
+               'gate array. Blue: the VIA socket the rePico plugs into.', CAP))
+
+    s.append(PageBreak())
+    s.append(Image(p2, width=165 * mm, height=165 * mm * h2 / w2))
+    s.append(P('Figure 2: zoom of your photo, same orientation. The numbers are pin numbers. Gate array: pin 1 is '
+               'top right, pins 1-20 run to the LEFT along the top row, pins 21-40 run to the RIGHT along the '
+               'bottom row (the row facing the VIA socket). <b>Pin 31 (red) is the 11th leg from the left in the '
+               'bottom row.</b>', CAP))
+    s.append(P('In your photo the print on the chips is upside down, so pin 1 is at the top right. If you look at '
+               'the board from the other side (print readable), everything is turned around: then pin 1 is bottom '
+               'left and pin 31 is the 10th leg from the left in the top row. The meter checks on the next pages '
+               'tell you for sure.', NOTE))
+
+    s.append(PageBreak())
     marks = {19: (C_A, 'OE / MODE  (wire A)'), 39: (C_B, 'SOE  (wire B)'), 31: (C_CUT, 'CLR  (cut, wire C)'),
              30: (C_5V, '+5V (check)'), 32: (C_GND, 'GND (check)'), 10: (C_GND, 'GND (check)'),
              40: (C_CHK, 'BYTE (check)'), 17: (C_CHK, 'SYNC (check)')}
-    s.append(fig_gate_array(marks, 'Gate array 251828 seen from ABOVE, notch at the top'))
-    s.append(P('Figure 2: the pins you need. Pin 31 sits between +5V (pin 30, below it) and GND (pin 32, above '
+    s.append(fig_gate_array(marks, 'Gate array 251828 as a drawing, notch at the top'))
+    s.append(P('Figure 3: the pins you need, as a drawing. Pin 31 sits between +5V (pin 30, below it) and GND (pin 32, above '
                'it).', CAP))
 
-    s.append(PageBreak())
     s.append(P('Check with the meter (beep mode, drive unplugged, rePico out)', H2))
-    s.append(P('The VIA socket on the drive board has the same pin numbers as a 6522: notch at one end, pin 1 '
-               'next to the notch on the left. Each line must beep:', BODY))
+    s.append(P('The VIA socket U8 is marked in figure 2 (VIA 1, VIA 19, VIA 39). Its pins are counted the same '
+               'way as the gate array: VIA 20 is the top-left hole, VIA 21 the bottom-left, VIA 40 the '
+               'bottom-right. Each line must beep:', BODY))
     s.append(table([
         ['gate array pin', 'beeps to', 'it proves'],
-        ['10', 'VIA socket pin 1 (GND)', 'you counted the left side right'],
+        ['10', 'VIA socket pin 1 (GND)', 'the pins 1-20 are counted right'],
         ['17', 'VIA socket pin 17', 'SYNC'],
         ['19', 'VIA socket pin 19', 'MODE: here goes wire A'],
-        ['30', 'VIA socket pin 20 (+5V)', 'the pin below 31'],
-        ['32', 'VIA socket pin 1 (GND)', 'the pin above 31'],
+        ['30', 'VIA socket pin 20 (+5V)', 'the neighbour of 31 (one side)'],
+        ['32', 'VIA socket pin 1 (GND)', 'the neighbour of 31 (other side)'],
         ['39', 'VIA socket pin 39', 'SOE: here goes wire B'],
         ['40', 'VIA socket pin 40', 'BYTE READY']],
         [40 * mm, 64 * mm, 60 * mm]))
@@ -358,7 +435,7 @@ def build():
     s.append(P('Pin 31 (CLR) gets the read pulses from the read amplifier U12. From now on it gets them from the '
                'Pico instead, so its connection to the board has to go.', BODY))
     s.append(fig_clip_leg())
-    s.append(P('Figure 3: side view of three legs of the gate array, right side. Only the middle leg (31) is cut.',
+    s.append(P('Figure 4: side view of three legs of the gate array, right side. Only the middle leg (31) is cut.',
                CAP))
     s.append(P('1. Cut leg 31 with the flush cutters <b>close to the board</b>, so most of the leg stays on the chip.',
                STEP))
@@ -375,13 +452,13 @@ def build():
                '<b>P2</b> (VIA pins 21-40). Pin 19 of each row must no longer reach the socket: P1 pin 19 ties '
                'MODE to GND, P2 pin 19 is the Pico\'s copy of SOE. Wires A and B take their place.', BODY))
     s.append(fig_repico_bottom())
-    s.append(P('Figure 4: rePico bottom side. Red: the two pins to clip and Q1. Blue/orange/purple: the start of '
+    s.append(P('Figure 5: rePico bottom side. Red: the two pins to clip and Q1. Blue/orange/purple: the start of '
                'wires A, B and C.', CAP))
 
     s.append(PageBreak())
     s.append(fig_header_clip())
-    s.append(P('Figure 5: side view of a plug pin row. Pin 19 is the second pin from the pin 20 end.', CAP))
-    s.append(P('1. Find P1 and P2 in figure 4. The two rows are numbered in opposite directions: P1 pin 20 and '
+    s.append(P('Figure 6: side view of a plug pin row. Pin 19 is the second pin from the pin 20 end.', CAP))
+    s.append(P('1. Find P1 and P2 in figure 5. The two rows are numbered in opposite directions: P1 pin 20 and '
                'P2 pin 20 are at opposite ends. Pin 19 is <b>the second pin from the pin 20 end</b>.', STEP))
     s.append(P('2. Check before you cut: P1 pin 20 beeps to VIA socket pin 20 on the rePico, and P1 pin 19 beeps '
                'to GND (VIA socket pin 1). P2 pin 20 beeps to VIA socket pin 40; P2 pin 19 is the one next to it.',
@@ -395,9 +472,9 @@ def build():
                'array drives port A, so the buffer must always listen. With Q1\'s leg 3 off, a resistor (R4) holds '
                'it in "listen" mode.', BODY))
     s.append(fig_q1_zoom())
-    s.append(P('Figure 6: Q1 is the small 3-leg transistor next to the VIA socket. Q6, just above it, looks the '
+    s.append(P('Figure 7: Q1 is the small 3-leg transistor next to the VIA socket. Q6, just above it, looks the '
                'same: do not touch it.', CAP))
-    s.append(P('1. Find Q1 (figure 6). It has two legs on one side and <b>one leg alone</b> on the other side: '
+    s.append(P('1. Find Q1 (figure 7). It has two legs on one side and <b>one leg alone</b> on the other side: '
                'that one is leg 3.', STEP))
     s.append(P('2. Check: one of the two legs on the other side (leg 2) <b>beeps to GND</b>. Q6 has no leg on GND: '
                'if nothing beeps to GND, you have the wrong transistor.', STEP))
@@ -408,9 +485,9 @@ def build():
     s.append(PageBreak())
     s.append(P('Step 5: three wires', H2))
     s.append(fig_wiring())
-    s.append(P('Figure 7: the three wires.', CAP))
+    s.append(P('Figure 8: the three wires.', CAP))
     s.append(table([
-        ['wire', 'on the rePico (bottom side, figure 4)', 'on the gate array'],
+        ['wire', 'on the rePico (bottom side, figure 5)', 'on the gate array'],
         ['A (MODE)', 'VIA socket pin 19 (the socket pad, not the clipped pin)', 'pin 19'],
         ['B (SOE)', 'VIA socket pin 39', 'pin 39'],
         ['C (flux)', 'Pico socket pin 5 (GP3)', 'pin 31 (the cut leg, on the chip)']],
