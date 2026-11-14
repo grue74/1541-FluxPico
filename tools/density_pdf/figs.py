@@ -62,7 +62,7 @@ def _xy(ref, num):
 
 
 def board_drawing(v, layer, pad_labels=(), extra=None, title=None,
-                  parts=('IC1', 'P1', 'U1', 'R19', 'Q9', 'J8', 'BZ1')):
+                  parts=('IC1', 'P1', 'U1', 'R19', 'Q9', 'J8', 'BZ1'), lsize=7):
     d = Drawing(v.w, v.h + (14 if title else 0))
     bx0, by0, bx1, by1 = B.outline
     ax, ay = v.p(max(bx0, v.x0), min(by1, v.y1))
@@ -107,7 +107,8 @@ def board_drawing(v, layer, pad_labels=(), extra=None, title=None,
             continue
         d.add(Rect(rx0, ry0, rx1 - rx0, ry1 - ry0, fillColor=None,
                    strokeColor=colors.HexColor('#6A8F6A'), strokeWidth=0.6, strokeDashArray=[2, 2]))
-        names = {'IC1': 'IC1 VIA socket', 'P1': 'P1', 'U1': 'U1 Pico', 'J8': 'J8', 'BZ1': 'BZ1'}
+        names = {'IC1': 'IC1 VIA socket', 'P1': 'P1', 'P2': 'P2', 'U1': 'U1 Pico', 'J8': 'J8', 'BZ1': 'BZ1',
+                 'Q1': 'Q1'}
         if ref in names and (ry1 - ry0) > 40:
             d.add(String((rx0 + rx1) / 2, ry0 + 3, names[ref], fontName='Helvetica', fontSize=6.5,
                          fillColor=colors.HexColor('#4A6F4A'), textAnchor='middle'))
@@ -120,10 +121,11 @@ def board_drawing(v, layer, pad_labels=(), extra=None, title=None,
         d.add(Circle(x, y, r, fillColor=None, strokeColor=col, strokeWidth=1.6))
         tx, ty = x + dx, y + dy
         d.add(Line(x, y, tx, ty, strokeColor=col, strokeWidth=0.6))
-        tw = len(text) * 3.75 + 4
+        tw = len(text) * lsize * 0.56 + 4
         left = tx if dx > 0 else tx - tw
-        d.add(Rect(left - 1, ty - 3.5, tw + 2, 10, fillColor=colors.white, strokeColor=col, strokeWidth=0.5))
-        d.add(String(left + 1, ty - 0.3, text, fontName='Helvetica-Bold', fontSize=7, fillColor=col))
+        d.add(Rect(left - 1, ty - lsize * 0.5, tw + 2, lsize * 1.45, fillColor=colors.white, strokeColor=col,
+                   strokeWidth=0.5 + lsize / 14))
+        d.add(String(left + 1, ty - 0.3, text, fontName='Helvetica-Bold', fontSize=lsize, fillColor=col))
     if title:
         d.add(String(v.w / 2, v.h + 4, title, fontName='Helvetica-Bold', fontSize=9, fillColor=C_TEXT,
                      textAnchor='middle'))

@@ -1,0 +1,468 @@
+"""Build doc/flux-mod-1541-II.pdf: step-by-step instructions with large pictures for the
+1541-FluxPico flux mod (PCB v1.7 in a 1541-II with the 40-pin 251828 gate array).
+
+Board drawings come from the KiCad PCB file (pcb.py / figs.py); the gate array pins from the
+251828 (64H156) 40-pin pinout; the photo is from doc/pictures.
+"""
+import os
+
+from PIL import Image as PImage, ImageDraw, ImageFont
+from reportlab.graphics.shapes import Circle, Drawing, Line, Polygon, Rect, String
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
+
+from figs import B, View, _xy, board_drawing
+
+REPO = r'E:\GitHub\1541-rePico'
+OUT = os.environ.get('PDF_OUT', os.path.join(REPO, 'doc', 'flux-mod-1541-II.pdf'))
+TMP = os.environ.get('PDF_TMP', os.path.join(REPO, 'tools', 'density_pdf', '_tmp'))
+PHOTO_DRIVE = os.path.join(REPO, 'doc', 'pictures', '1541-II_with_rePico.jpg')
+
+# strong, distinct colours (also readable when printed in grey)
+C_TEXT = colors.HexColor('#111111')
+C_EDGE = colors.HexColor('#1E5A1E')
+C_A = colors.HexColor('#0B5FD8')      # wire A: MODE
+C_B = colors.HexColor('#D97000')      # wire B: SOE
+C_C = colors.HexColor('#C0007A')      # wire C: flux
+C_CUT = colors.HexColor('#D10000')
+C_GND = colors.HexColor('#333333')
+C_5V = colors.HexColor('#A05A00')
+C_CHK = colors.HexColor('#2E7D32')
+
+styles = getSampleStyleSheet()
+H1 = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=20, leading=24, spaceAfter=8, textColor=C_EDGE)
+H2 = ParagraphStyle('H2', parent=styles['Heading2'], fontSize=15, leading=19, spaceBefore=8, spaceAfter=6,
+                    textColor=C_EDGE)
+BODY = ParagraphStyle('B', parent=styles['BodyText'], fontSize=12, leading=16, spaceAfter=6)
+STEP = ParagraphStyle('S', parent=BODY, leftIndent=18, firstLineIndent=-18, spaceAfter=7)
+CAP = ParagraphStyle('C', parent=BODY, fontSize=10.5, leading=13, alignment=TA_CENTER, spaceBefore=2,
+                     spaceAfter=10, textColor=colors.HexColor('#333333'))
+NOTE = ParagraphStyle('N', parent=BODY, backColor=colors.HexColor('#FFF4E0'), borderPadding=7,
+                      borderColor=colors.HexColor('#E0B060'), borderWidth=1, spaceBefore=6, spaceAfter=12)
+WARN = ParagraphStyle('W', parent=NOTE, backColor=colors.HexColor('#FDE6E6'), borderColor=C_CUT)
+
+
+def P(text, st=BODY):
+    return Paragraph(text, st)
+
+
+def table(rows, widths, size=11.5):
+    data = [[Paragraph(str(c), ParagraphStyle('t', parent=BODY, fontSize=size, leading=size + 3, spaceAfter=0))
+             for c in r] for r in rows]
+    t = Table(data, colWidths=widths, hAlign='LEFT')
+    t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.8, colors.HexColor('#777777')),
+                           ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                           ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#DDEBDD')),
+                           ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 5)]))
+    return t
+
+
+def text(d, x, y, s, size=11, col=C_TEXT, anchor='start', bold=True):
+    d.add(String(x, y, s, fontName='Helvetica-Bold' if bold else 'Helvetica', fontSize=size, fillColor=col,
+                 textAnchor=anchor))
+
+
+def tag(d, x, y, s, col, size=11, anchor='start'):
+    """text in a white box with a coloured frame"""
+    w = len(s) * size * 0.58 + 8
+    left = x if anchor == 'start' else (x - w if anchor == 'end' else x - w / 2)
+    d.add(Rect(left, y - size * 0.45, w, size * 1.55, fillColor=colors.white, strokeColor=col, strokeWidth=1.6))
+    text(d, left + 4, y, s, size, col)
+
+
+# --- gate array (251828, 40 pins) ---------------------------------------------
+
+GA_PINS = {1: 'TEST', 2: 'YB0', 3: 'YB1', 4: 'YB2', 5: 'YB3', 6: 'YB4', 7: 'YB5', 8: 'YB6', 9: 'YB7', 10: 'VSS (GND)',
+           11: 'STP1', 12: 'STP0', 13: 'MTR', 14: 'A', 15: 'DS0', 16: 'DS1', 17: 'SYNC', 18: 'TED', 19: 'OE (MODE)',
+           20: 'ACCL (GND)', 21: 'OSC', 22: 'ATNA', 23: 'ATNI', 24: 'ATN', 25: 'Y0', 26: 'Y1', 27: 'Y2', 28: 'Y3',
+           29: 'XRW', 30: 'VCC (+5V)', 31: 'CLR', 32: 'PLL (GND)', 33: 'LOCK (GND)', 34: 'R/W', 35: 'Q', 36: 'XQ',
+           37: 'CK', 38: 'B', 39: 'SOE', 40: 'BYTE'}
+
+
+def pin_xy(n, x0, ytop, step, bw):
+    """pin end point of a DIP-40 seen from above, notch at the top; left row 1..20 down, right row 21..40 up"""
+    if n <= 20:
+        return x0, ytop - (n - 0.5) * step, -1
+    return x0 + bw, ytop - (40 - n + 0.5) * step, 1
+
+
+def fig_gate_array(marks, title, step=15.5):
+    """marks: {pin: (colour, label)}"""
+    W = 165 * mm
+    rows = 20
+    H = rows * step + 46
+    d = Drawing(W, H)
+    bw = 92
+    x0 = W / 2 - bw / 2
+    ytop = H - 30
+    # body + notch
+    d.add(Rect(x0, ytop - rows * step, bw, rows * step, fillColor=colors.HexColor('#2A2A2A'), strokeColor=C_TEXT,
+               strokeWidth=1.2))
+    d.add(Circle(x0 + bw / 2, ytop, 9, fillColor=colors.white, strokeColor=C_TEXT, strokeWidth=1))
+    d.add(Rect(x0 + bw / 2 - 10, ytop, 20, 10, fillColor=colors.white, strokeColor=None))
+    text(d, x0 + bw / 2, ytop + 8, 'notch', 10, C_TEXT, 'middle', bold=False)
+    text(d, x0 + bw / 2, ytop - rows * step / 2 + 10, '251828', 13, colors.white, 'middle')
+    text(d, x0 + bw / 2, ytop - rows * step / 2 - 6, 'gate array', 10, colors.white, 'middle', bold=False)
+    d.add(Circle(x0 + 12, ytop - 12, 3.5, fillColor=colors.HexColor('#888888'), strokeColor=None))
+    for n in range(1, 41):
+        x, y, side = pin_xy(n, x0, ytop, step, bw)
+        col = marks.get(n, (None, None))[0]
+        pw = 14
+        px = x - pw if side < 0 else x
+        d.add(Rect(px, y - 4, pw, 8, fillColor=col or colors.HexColor('#C8C8C8'),
+                   strokeColor=C_TEXT, strokeWidth=0.6))
+        nx = x + 4 if side < 0 else x - 4
+        text(d, nx, y - 3.6, str(n), 10, colors.white, 'start' if side < 0 else 'end')
+        if n in marks:
+            lab = '%d  %s' % (n, marks[n][1])
+            ex = x - pw - 12 if side < 0 else x + pw + 12
+            d.add(Line(x - pw * (side < 0) + pw * (side > 0), y, ex, y, strokeColor=col, strokeWidth=1.6))
+            tag(d, ex, y - 3.5, lab, col, 11, 'end' if side < 0 else 'start')
+    text(d, W / 2, H - 12, title, 12.5, C_TEXT, 'middle')
+    return d
+
+
+def fig_clip_leg():
+    """side view: cut leg 31 near the board, bend the top part away, wire to it"""
+    W, H = 165 * mm, 150
+    d = Drawing(W, H)
+    for i, (x0, cap) in enumerate(((40, '1. cut here, close to the board'), (260, '2. bend out, solder wire C'))):
+        d.add(Rect(x0 - 20, 20, 170, 10, fillColor=colors.HexColor('#2E7D32'), strokeColor=C_TEXT))  # PCB
+        text(d, x0 - 16, 6, 'drive main board', 10, C_TEXT, bold=False)
+        d.add(Rect(x0, 70, 120, 34, fillColor=colors.HexColor('#2A2A2A'), strokeColor=C_TEXT))      # chip body
+        text(d, x0 + 60, 84, 'gate array', 10.5, colors.white, 'middle')
+        # neighbour legs (grey) and leg 31
+        for k, lx in enumerate((x0 + 30, x0 + 60, x0 + 90)):
+            mine = (k == 1)
+            col = C_CUT if mine else colors.HexColor('#A0A0A0')
+            if i == 0 or not mine:
+                d.add(Rect(lx - 3, 30, 6, 40, fillColor=col, strokeColor=C_TEXT, strokeWidth=0.5))
+            else:
+                d.add(Rect(lx - 3, 30, 6, 10, fillColor=col, strokeColor=C_TEXT, strokeWidth=0.5))   # stub
+                d.add(Polygon([lx - 3, 70, lx + 3, 70, lx + 15, 46, lx + 9, 46], fillColor=col, strokeColor=C_TEXT,
+                              strokeWidth=0.5))
+                d.add(Line(lx + 12, 46, lx + 80, 56, strokeColor=C_C, strokeWidth=2.2))
+                tag(d, lx + 82, 52, 'wire C', C_C, 11)
+            text(d, lx, 112, ('30', '31', '32')[k], 11, col if mine else C_TEXT, 'middle')
+        if i == 0:
+            for dx in (-1.2, 1.2):
+                d.add(Line(x0 + 50, 40 + dx * 2, x0 + 70, 40 + dx * 2, strokeColor=C_CUT, strokeWidth=2))
+        text(d, x0 + 60, 134, cap, 11, C_TEXT, 'middle')
+    return d
+
+
+# --- rePico board ---------------------------------------------------------------
+
+def fig_repico_bottom():
+    bx0, by0, bx1, by1 = B.outline
+    v = View(bx0, by0, bx1, by1, 165 * mm, bottom=True)
+    labels = [('P1', 19, C_CUT, 'P1 pin 19: CLIP', -50, -75),
+              ('P2', 19, C_CUT, 'P2 pin 19: CLIP', 30, -60),
+              ('IC1', 19, C_A, 'A: VIA pin 19 (MODE)', 60, -112),
+              ('IC1', 39, C_B, 'B: VIA pin 39 (SOE)', 30, 40),
+              ('U1', 5, C_C, 'C: Pico pin 5 (GP3)', -20, -150),
+              ('Q1', 3, C_CUT, 'Q1: lift leg 3', 70, -45)]
+    return board_drawing(v, 'B.Cu', labels, None, title='rePico v1.7, BOTTOM side (as you see it upside down)',
+                         parts=('IC1', 'P1', 'P2', 'U1', 'Q1'), lsize=11)
+
+
+def fig_q1_zoom():
+    v = View(118.0, 69.5, 134.5, 80.5, 160 * mm, bottom=True)
+    labels = [('Q1', 3, C_CUT, 'Q1 leg 3 (alone): LIFT', 70, -55),
+              ('Q1', 2, C_GND, 'Q1 leg 2: beeps to GND', -70, -30),
+              ('Q1', 1, C_A, 'Q1 leg 1', -70, 12),
+              ('Q6', 3, colors.HexColor('#666666'), 'Q6: do NOT touch', -50, 40),
+              ('IC1', 19, C_A, 'VIA pin 19 (MODE)', 25, -95),
+              ('P1', 19, C_CUT, 'P1 pin 19', 15, -45)]
+    return board_drawing(v, 'B.Cu', labels, None, title='Zoom, BOTTOM side: Q1 next to the VIA socket',
+                         parts=('IC1', 'P1', 'Q1', 'Q6', 'R4', 'R14'), lsize=11)
+
+
+def fig_header_clip():
+    """side view of the plug pins: cut pin 19 flush under the black plastic"""
+    W, H = 165 * mm, 150
+    d = Drawing(W, H)
+    d.add(Rect(40, 110, 380, 10, fillColor=colors.HexColor('#2E7D32'), strokeColor=C_TEXT))
+    text(d, 44, 126, 'rePico board (upside down in your hand: this side is the bottom)', 10.5, C_TEXT, bold=False)
+    d.add(Rect(52, 96, 312, 14, fillColor=colors.HexColor('#202020'), strokeColor=C_TEXT))
+    text(d, 220, 100, 'black plastic of the pin header', 9.5, colors.white, 'middle', bold=False)
+    for k in range(9):
+        x = 70 + k * 36
+        pin19 = (k == 7)
+        col = C_CUT if pin19 else colors.HexColor('#C9A400')
+        if pin19:
+            d.add(Rect(x - 3, 92, 6, 4, fillColor=col, strokeColor=C_TEXT, strokeWidth=0.4))
+            d.add(Rect(x - 3, 20, 6, 60, fillColor=None, strokeColor=col, strokeWidth=1, strokeDashArray=[3, 2]))
+            for dy in (-1.3, 1.3):
+                d.add(Line(x - 14, 90 + dy * 2, x + 14, 90 + dy * 2, strokeColor=C_CUT, strokeWidth=2))
+            d.add(Line(x + 14, 90, x + 40, 66, strokeColor=C_CUT, strokeWidth=1.2))
+            tag(d, x + 40, 60, 'cut flush', C_CUT, 11)
+            text(d, x, 8, '19', 12, C_CUT, 'middle')
+        else:
+            d.add(Rect(x - 3, 20, 6, 76, fillColor=col, strokeColor=C_TEXT, strokeWidth=0.4))
+            text(d, x, 8, str(12 + k), 10, C_TEXT, 'middle', bold=False)
+    text(d, 70 + 8 * 36 + 14, 8, '<- end of the row', 10, C_TEXT, 'start', bold=False)
+    return d
+
+
+def fig_wiring():
+    W, H = 165 * mm, 200
+    d = Drawing(W, H)
+    lx, lw = 6, 150
+    gx, gw = W - 160, 154
+    d.add(Rect(lx, 20, lw, 160, fillColor=colors.HexColor('#E8F2E8'), strokeColor=C_EDGE, strokeWidth=1.5))
+    text(d, lx + lw / 2, 164, 'rePico (bottom)', 13, C_EDGE, 'middle')
+    d.add(Rect(gx, 20, gw, 160, fillColor=colors.HexColor('#EEEEEE'), strokeColor=C_TEXT, strokeWidth=1.5))
+    text(d, gx + gw / 2, 164, 'gate array 251828', 13, C_TEXT, 'middle')
+    for y, col, a, b, name in ((130, C_A, 'VIA pin 19', 'pin 19 (OE)', 'A'),
+                               (90, C_B, 'VIA pin 39', 'pin 39 (SOE)', 'B'),
+                               (50, C_C, 'Pico pin 5', 'pin 31 (CLR)', 'C')):
+        text(d, lx + 10, y - 4, a, 12.5, col)
+        text(d, gx + 10, y - 4, b, 12.5, col)
+        d.add(Line(lx + lw, y, gx, y, strokeColor=col, strokeWidth=3))
+        tag(d, (lx + lw + gx) / 2, y + 5, 'wire ' + name, col, 12, 'middle')
+    text(d, W / 2, 4, 'three wires, about 10-15 cm each', 11, C_TEXT, 'middle', bold=False)
+    return d
+
+
+def fig_before_after():
+    W, H = 165 * mm, 175
+    d = Drawing(W, H)
+
+    def box(x, y, w, h, title, lines, col):
+        d.add(Rect(x, y, w, h, rx=6, ry=6, fillColor=colors.white, strokeColor=col, strokeWidth=1.8))
+        text(d, x + w / 2, y + h - 16, title, 12.5, col, 'middle')
+        for i, s in enumerate(lines):
+            text(d, x + w / 2, y + h - 34 - i * 14, s, 10.5, C_TEXT, 'middle', bold=False)
+
+    half = W / 2 - 8
+    box(4, 8, half, H - 16, 'BEFORE (rePico)', ['the Pico computes bytes', 'and puts them on port A,',
+                                                 'pulses BYTE READY and SYNC.', '', 'the gate array is held off',
+                                                 '(MODE pin tied to GND)', '', 'density: guessed (.den files)'],
+        colors.HexColor('#777777'))
+    box(W / 2 + 4, 8, half, H - 16, 'AFTER (FluxPico)', ['the Pico sends flux pulses', 'into the gate array (CLR),',
+                                                          'like the read head would.', '',
+                                                          'the gate array decodes, makes', 'SYNC, BYTE READY, port A',
+                                                          '', 'density: the drive\'s own'], C_EDGE)
+    return d
+
+
+# --- photo with notes -------------------------------------------------------------
+
+def annotated_photo():
+    os.makedirs(TMP, exist_ok=True)
+    out = os.path.join(TMP, 'drive_annotated.jpg')
+    im = PImage.open(PHOTO_DRIVE).convert('RGB')
+    dr = ImageDraw.Draw(im)
+    f = ImageFont.truetype(r'C:\Windows\Fonts\arialbd.ttf', 78)
+
+    def mark(box, col, label, tx, ty):
+        dr.rectangle(box, outline=col, width=14)
+        tw = dr.textlength(label, font=f)
+        dr.rectangle((tx - 14, ty - 10, tx + tw + 14, ty + 96), fill='white', outline=col, width=8)
+        dr.text((tx, ty), label, fill=col, font=f)
+
+    mark((510, 60, 820, 690), (200, 0, 0), 'ROM 251968 - not this chip', 870, 90)
+    mark((2080, 1220, 2330, 1520), (90, 90, 90), 'U12 read amplifier', 2020, 1040)
+    mark((930, 690, 1975, 1740), (0, 110, 0), 'gate array: under the rePico', 960, 1600)
+    im.thumbnail((1800, 1800))
+    im.save(out, quality=88)
+    return out, im.size
+
+
+# --- document -------------------------------------------------------------------------
+
+def build():
+    s = []
+    s.append(P('1541-FluxPico: flux mod for the 1541-II', H1))
+    s.append(P('For the rePico board <b>v1.7</b> in a <b>1541-II</b> (main board ASSY 340503) with the 40-pin '
+               'gate array <b>251828</b>. After this mod the Pico sends flux pulses into the drive\'s own read '
+               'circuit, and the drive decodes them itself.', BODY))
+    s.append(fig_before_after())
+    s.append(P('What you change', H2))
+    s.append(table([
+        ['where', 'what', 'step'],
+        ['drive main board', 'cut leg 31 of the gate array, solder wire C to it', '2'],
+        ['rePico, bottom', 'clip two plug pins: P1 pin 19 and P2 pin 19', '3'],
+        ['rePico, bottom', 'lift one leg of the small transistor Q1', '4'],
+        ['rePico -> gate array', 'three wires: A (MODE), B (SOE), C (flux)', '5']],
+        [44 * mm, 100 * mm, 20 * mm]))
+    s.append(Spacer(1, 8))
+    s.append(P('<b>The buzzer stays.</b> No level shifter module and no extra parts are needed.', BODY))
+    s.append(P('<b>After the mod, never run the old rePico firmware.</b> The port A buffer then always sends the '
+               'drive data to the Pico, while the old firmware also drives those Pico pins: both would push '
+               'against each other. Flash the FluxPico firmware <b>before</b> you plug the modified board in.',
+               WARN))
+
+    s.append(PageBreak())
+    s.append(P('Before you start', H2))
+    s.append(table([
+        ['you need', 'note'],
+        ['multimeter with beep (continuity)', 'to find the right pins: every step has a check'],
+        ['soldering iron, thin solder', ''],
+        ['small flush cutters', 'for the plug pins and the gate array leg'],
+        ['thin insulated wire, about 50 cm', 'wire-wrap wire (0.25 mm) is ideal; three colours help'],
+        ['tweezers or a needle', 'to lift Q1\'s leg'],
+        ['magnifier or phone camera', 'take a close photo and zoom in on the screen to check your work']],
+        [70 * mm, 94 * mm]))
+    s.append(Spacer(1, 8))
+    s.append(P('Work with the drive <b>unplugged</b>. Remove the Pico from its socket while you work on the rePico '
+               'board. Take photos before you change anything.', NOTE))
+    s.append(P('If something does not match a picture or a meter check: stop and send a photo. A wrong pin '
+               'is easy to fix before soldering and hard after.', NOTE))
+    s.append(P('Step 1: find the gate array', H2))
+    path, (pw, ph) = annotated_photo()
+    s.append(Image(path, width=165 * mm, height=165 * mm * ph / pw))
+    s.append(P('Figure 1: a 1541-II with the rePico board. The 28-pin chip marked 251968 is the DOS ROM, not '
+               'the gate array. The gate array and the second VIA are most likely under the rePico board.', CAP))
+
+    s.append(PageBreak())
+    s.append(P('1. Pull the rePico board out of the VIA socket. You now see the 40-pin VIA socket and, next to it, '
+               'more chips. The gate array is the 40-pin chip printed <b>251828</b> (U10 in the schematic). The '
+               'other 40-pin chips are the 6502 CPU and a 6522 VIA. Read the print on the chips.', STEP))
+    s.append(P('2. Turn the drive board so that the gate array\'s <b>notch</b> points away from you (figure 2). '
+               'Pin 1 is then top left; pins 1-20 go down the left side, pins 21-40 come back up the right side.',
+               STEP))
+    marks = {19: (C_A, 'OE / MODE  (wire A)'), 39: (C_B, 'SOE  (wire B)'), 31: (C_CUT, 'CLR  (cut, wire C)'),
+             30: (C_5V, '+5V (check)'), 32: (C_GND, 'GND (check)'), 10: (C_GND, 'GND (check)'),
+             40: (C_CHK, 'BYTE (check)'), 17: (C_CHK, 'SYNC (check)')}
+    s.append(fig_gate_array(marks, 'Gate array 251828 seen from ABOVE, notch at the top'))
+    s.append(P('Figure 2: the pins you need. Pin 31 sits between +5V (pin 30, below it) and GND (pin 32, above '
+               'it).', CAP))
+
+    s.append(PageBreak())
+    s.append(P('Check with the meter (beep mode, drive unplugged, rePico out)', H2))
+    s.append(P('The VIA socket on the drive board has the same pin numbers as a 6522: notch at one end, pin 1 '
+               'next to the notch on the left. Each line must beep:', BODY))
+    s.append(table([
+        ['gate array pin', 'beeps to', 'it proves'],
+        ['10', 'VIA socket pin 1 (GND)', 'you counted the left side right'],
+        ['17', 'VIA socket pin 17', 'SYNC'],
+        ['19', 'VIA socket pin 19', 'MODE: here goes wire A'],
+        ['30', 'VIA socket pin 20 (+5V)', 'the pin below 31'],
+        ['32', 'VIA socket pin 1 (GND)', 'the pin above 31'],
+        ['39', 'VIA socket pin 39', 'SOE: here goes wire B'],
+        ['40', 'VIA socket pin 40', 'BYTE READY']],
+        [40 * mm, 64 * mm, 60 * mm]))
+    s.append(Spacer(1, 8))
+    s.append(P('All seven beep? Then pin 31 is the one between pin 30 (+5V) and pin 32 (GND). If the chip has '
+               '42 pins instead of 40, or a check fails: stop and send a photo, the numbers are then different.',
+               NOTE))
+
+    s.append(P('Step 2: disconnect gate array pin 31', H2))
+    s.append(P('Pin 31 (CLR) gets the read pulses from the read amplifier U12. From now on it gets them from the '
+               'Pico instead, so its connection to the board has to go.', BODY))
+    s.append(fig_clip_leg())
+    s.append(P('Figure 3: side view of three legs of the gate array, right side. Only the middle leg (31) is cut.',
+               CAP))
+    s.append(P('1. Cut leg 31 with the flush cutters <b>close to the board</b>, so most of the leg stays on the chip.',
+               STEP))
+    s.append(P('2. Bend the leg on the chip a little outwards with tweezers, so it can not touch the stub.', STEP))
+    s.append(P('3. Solder <b>wire C</b> to the leg on the chip.', STEP))
+    s.append(P('4. Check: leg 31 (on the chip) to the stub on the board: <b>no beep</b>. Leg 31 to leg 30 and to '
+               'leg 32: no beep.', STEP))
+    s.append(P('If the gate array sits in a socket: pull the chip, bend leg 31 outwards so it stays outside the '
+               'socket, put the chip back and solder wire C to that leg. No cutting needed.', NOTE))
+
+    s.append(PageBreak())
+    s.append(P('Step 3: clip two plug pins on the rePico', H2))
+    s.append(P('The rePico plugs into the VIA socket with two rows of pins, <b>P1</b> (VIA pins 1-20) and '
+               '<b>P2</b> (VIA pins 21-40). Pin 19 of each row must no longer reach the socket: P1 pin 19 ties '
+               'MODE to GND, P2 pin 19 is the Pico\'s copy of SOE. Wires A and B take their place.', BODY))
+    s.append(fig_repico_bottom())
+    s.append(P('Figure 4: rePico bottom side. Red: the two pins to clip and Q1. Blue/orange/purple: the start of '
+               'wires A, B and C.', CAP))
+
+    s.append(PageBreak())
+    s.append(fig_header_clip())
+    s.append(P('Figure 5: side view of a plug pin row. Pin 19 is the second pin from the pin 20 end.', CAP))
+    s.append(P('1. Find P1 and P2 in figure 4. The two rows are numbered in opposite directions: P1 pin 20 and '
+               'P2 pin 20 are at opposite ends. Pin 19 is <b>the second pin from the pin 20 end</b>.', STEP))
+    s.append(P('2. Check before you cut: P1 pin 20 beeps to VIA socket pin 20 on the rePico, and P1 pin 19 beeps '
+               'to GND (VIA socket pin 1). P2 pin 20 beeps to VIA socket pin 40; P2 pin 19 is the one next to it.',
+               STEP))
+    s.append(P('3. Cut each pin <b>flush with the black plastic</b>, so nothing sticks out to enter the socket.',
+               STEP))
+
+    s.append(PageBreak())
+    s.append(P('Step 4: lift Q1\'s single leg', H2))
+    s.append(P('Q1 turns the port A buffer (74LVC4245) around whenever the drive reads. In flux mode the gate '
+               'array drives port A, so the buffer must always listen. With Q1\'s leg 3 off, a resistor (R4) holds '
+               'it in "listen" mode.', BODY))
+    s.append(fig_q1_zoom())
+    s.append(P('Figure 6: Q1 is the small 3-leg transistor next to the VIA socket. Q6, just above it, looks the '
+               'same: do not touch it.', CAP))
+    s.append(P('1. Find Q1 (figure 6). It has two legs on one side and <b>one leg alone</b> on the other side: '
+               'that one is leg 3.', STEP))
+    s.append(P('2. Check: one of the two legs on the other side (leg 2) <b>beeps to GND</b>. Q6 has no leg on GND: '
+               'if nothing beeps to GND, you have the wrong transistor.', STEP))
+    s.append(P('3. Heat leg 3 with the iron and lift it gently with a needle or tweezers, about 0.5 mm, so it does '
+               'not touch its pad any more. (Removing Q1 completely is also fine.)', STEP))
+    s.append(P('4. Check: leg 3 to its pad: no beep.', STEP))
+
+    s.append(PageBreak())
+    s.append(P('Step 5: three wires', H2))
+    s.append(fig_wiring())
+    s.append(P('Figure 7: the three wires.', CAP))
+    s.append(table([
+        ['wire', 'on the rePico (bottom side, figure 4)', 'on the gate array'],
+        ['A (MODE)', 'VIA socket pin 19 (the socket pad, not the clipped pin)', 'pin 19'],
+        ['B (SOE)', 'VIA socket pin 39', 'pin 39'],
+        ['C (flux)', 'Pico socket pin 5 (GP3)', 'pin 31 (the cut leg, on the chip)']],
+        [26 * mm, 88 * mm, 50 * mm]))
+    s.append(Spacer(1, 8))
+    s.append(P('Solder to the top of the gate array legs (where they leave the chip). Keep the wires flat on the '
+               'bottom of the rePico and lead them down beside the plug pins. Check that the rePico still goes '
+               'fully into the socket.', BODY))
+
+    s.append(PageBreak())
+    s.append(P('Step 6: final checks (drive unplugged, Pico out)', H2))
+    s.append(table([
+        ['measure', 'expected'],
+        ['VIA socket pin 19 on the rePico  ->  gate array pin 19', 'beep (wire A)'],
+        ['VIA socket pin 39 on the rePico  ->  gate array pin 39', 'beep (wire B)'],
+        ['Pico socket pin 5  ->  gate array leg 31', 'beep (wire C)'],
+        ['gate array leg 31  ->  its stub on the board', 'no beep'],
+        ['VIA socket pin 19  ->  GND', 'no beep (was GND before)'],
+        ['wire A, B, C  ->  each other and GND', 'no beep'],
+        ['+5V  ->  GND', 'no beep']],
+        [110 * mm, 54 * mm]))
+    s.append(Spacer(1, 10))
+    s.append(P('Then put the Pico back, plug the rePico in, flash the <b>FluxPico</b> firmware and switch on. The '
+               'first start runs a short calibration: the Pico tries different pulse shapes on pin 31 and watches '
+               'the gate array\'s SYNC and port A. The display and the USB log show the result.', BODY))
+    s.append(P('In write mode the drive\'s read/write amplifier also writes to the head: keep no disk in the '
+               'mechanism, or unplug the head cable.', NOTE))
+    s.append(P('Why each change is needed', H2))
+    s.append(table([
+        ['change', 'reason'],
+        ['gate array pin 31 cut', 'the read amplifier U12 would fight the Pico\'s pulses'],
+        ['P1 pin 19 clipped, wire A', 'the rePico tied MODE to GND, which kept the gate array switched off'],
+        ['P2 pin 19 clipped, wire B', 'the gate array needs the real SOE from the VIA; it frees the Pico pin GP3'],
+        ['Q1 leg lifted', 'the port A buffer must only listen; the gate array drives port A now'],
+        ['wire C from Pico GP3', 'the flux pulses (3.3 V is enough for the gate array input)']],
+        [52 * mm, 112 * mm]))
+
+    doc = SimpleDocTemplate(OUT, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=15 * mm,
+                            bottomMargin=16 * mm, title='1541-FluxPico: flux mod for the 1541-II',
+                            author='1541-FluxPico')
+
+    def footer(canvas, doc_):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 9)
+        canvas.setFillColor(colors.HexColor('#555555'))
+        canvas.drawString(20 * mm, 9 * mm, '1541-FluxPico - flux mod, rePico v1.7 in a 1541-II')
+        canvas.drawRightString(A4[0] - 20 * mm, 9 * mm, 'page %d' % doc_.page)
+        canvas.restoreState()
+
+    doc.build(s, onFirstPage=footer, onLaterPages=footer)
+    print('wrote', OUT)
+
+
+if __name__ == '__main__':
+    build()

@@ -51,25 +51,25 @@ still sees the gate array's outputs: SYNC (GPIO2), BYTE READY (GPIO22) and port 
 
 ## Phase 1 - modification (PCB v1.7 + 1541-II)
 
-Everything switchable, so the old firmware can still be used during development.
+Step-by-step with pictures: `doc/flux-mod-1541-II.pdf` (generator `tools/density_pdf/make_flux_pdf.py`).
+The 1541-II has the **40-pin 251828-03** gate array: CLR = pin 31, OE (MODE) = pin 19, SOE = pin 39,
+BYTE = pin 40 (the schematic shows the 42-pin numbering, CLR = 33).
 
 | # | What | Why |
 |---|---|---|
-| 1 | **MODE jumper.** Lift P1 pin 19 from the board's GND (isolate the pad or replace the pin with a wired one) and add a 3-pin jumper: P1.19 to GND (old firmware) or to IC1 pin 19 = MODE (flux mode). | the gate array must see read/write mode to drive PA and take bytes for writing |
-| 2 | **SOE jumper.** Cut the SOE_GA trace between Pico pin 5 and R19 (as in `density-select-mod.pdf`). Jumper: P2.19 (SOE_GA) to Q9/R19 (old firmware) or to IC1 pin 39 = SOE (flux mode). Do not ground R19 pad 2 in flux mode. | the gate array needs the real SOE with no delay; frees GPIO3 |
-| 3 | **Cut U12 pin 33 -> U10 pin 33** on the drive's main board, close to U12. | the hybrid would fight the Pico's pulses |
-| 4 | **Flux out:** Pico GPIO3 (Pico pin 5, freed by step 2) -> level shifter -> **U10 pin 33** | the pulses |
-| 5 | Level shifter: one channel of the BSS138 module, HV = 5 V (VIA pin 20), LV = 3.3 V (Pico pin 36), GND. If calibration finds short active-high pulses, use a 74AHCT1G125 (5 V) instead: the module drives low edges fast but rises slowly through 10k. | |
-| 6 | Unplug the head cable (or keep no disk in the drive): in write mode the hybrid would write to a real disk. | safety |
+| 1 | Gate array pin 31 (CLR): cut the leg near the board, wire C to the leg | U12's Read Data would fight the Pico |
+| 2 | rePico: clip plug pins P1.19 and P2.19 flush | P1.19 tied MODE to GND; P2.19 carried the Pico's SOE_GA |
+| 3 | rePico: lift Q1 leg 3 (drain) | Q1 turned the 74LVC4245 towards the VIA in read mode; with it off, R4 (1M to 5V) keeps DIR high = VIA -> Pico, so the gate array can drive port A |
+| 4 | wire A: VIA socket pin 19 (MODE) -> gate array pin 19 | |
+| 5 | wire B: VIA socket pin 39 (SOE) -> gate array pin 39 | frees GPIO3 |
+| 6 | wire C: Pico pin 5 (GP3) -> gate array pin 31 | flux pulses, 3.3 V push-pull (no level shifter) |
 
-The **buzzer stays** (GPIO17). No wire for write data is needed: see phase 3.
-
-**Never run the old firmware in flux mode.** The gate array then drives PA while the Pico's
-74LVC4245 also drives it. The jumpers in old-firmware position restore the old wiring.
+The buzzer stays. **After the mod the old firmware must not run**: the 74LVC4245 then always drives
+GPIO8-15, and the old firmware drives them too.
 
 ## Phase 2 - firmware: flux output
 
-* build option `FLUX_MODE`: 74LVC4245 set to inputs only (never drives PA), BRDY and SYNC never
+* build option `FLUX_MODE`: GPIO8-15 always inputs (the 74LVC4245 drives them), BRDY and SYNC never
   pulled (read only), GPIO3 = flux output
 * tracks as flux: G64 bits -> a reversal at every 1 bit, cell = the track's speed zone
   (4.00/3.75/3.50/3.25 us) or the per-byte speed map; D64 tracks via GCR as now
