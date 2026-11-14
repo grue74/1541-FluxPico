@@ -67,6 +67,9 @@
 #define CAL_SETTLE_US   (1000u)
 #define CAL_MEASURE_US  (6000u)
 #define WRITE_ANCHOR_WAIT_US (2000u)    // longest wait for the write start interrupt
+#define CAL_RETRY_US    (5000000u)      // calibration retry while no pulse shape works
+#define CAP_STALE_US    (20000u)        // longer between two drains: the ring may have wrapped
+#define STEP_PRINT_US   (100000u)       // track change messages at most this often
 
 static const PIO fpio = pio1;
 static uint sm_flux, sm_cap;
@@ -121,6 +124,11 @@ static int8_t   last_motor = -1;
 static char   cal_log[1600];
 static size_t cal_log_len = 0;
 static bool   cal_log_shown = false;
+static uint32_t cal_runs = 0;
+static uint64_t cal_next_us = 0;
+static uint64_t cap_last_us = 0;        // last drain of the capture ring
+static uint64_t step_print_us = 0;
+static uint32_t st_steps = 0, st_cap_lost = 0;
 
 static void cal_printf(const char* fmt, ...)
 {
@@ -313,8 +321,8 @@ void flux_init(void)
     // capture state machine: snapshot at every falling BYTE READY edge
     sm_cap = (uint) pio_claim_unused_sm(fpio, true);
     uint16_t cp[3];
-    cp[0] = (uint16_t) pio_encode_wait_gpio(false, BRDY_PIN);
-    cp[1] = (uint16_t) (pio_encode_in(pio_pins, CAP_COUNT) | pio_encode_delay(15));  // ~0.1us, port A settles
+    cp[0] = (uint16_t) (pio_encode_wait_gpio(false, BRDY_PIN) | pio_encode_delay(15));  // ~0.1us: port A settles
+    cp[1] = (uint16_t) pio_encode_in(pio_pins, CAP_COUNT);
     cp[2] = (uint16_t) pio_encode_wait_gpio(true, BRDY_PIN);
     const pio_program_t cprog = { .instructions = cp, .length = 3, .origin = -1 };
     off_cap = (uint) pio_add_program(fpio, &cprog);
@@ -427,9 +435,30 @@ bool flux_calibrate(void)
     // expected: one SYNC per 64 bitcells, low for about 7 of them
     const uint32_t expect = CAL_MEASURE_US * 1000u / (64u * CAL_CELL_NS);
 
+    cal_next_us = time_us_64() + CAL_RETRY_US;  // next try if this one fails
+    cal_log_len = 0;
+    cal_log[0] = 0;
+    cal_log_shown = stdio_usb_connected();      // connected: the lines are printed right away
+    ++cal_runs;
+
+    // baseline without pulses: MODE, and SYNC with GPIO3 held low / high
+    {
+        uint32_t e_lo, l_lo, e_hi, l_hi;
+        flux_pin_release();                     // GPIO3 low
+        cal_measure(&e_lo, &l_lo);
+        gpio_put(FLUX_PIN, true);
+        cal_measure(&e_hi, &l_hi);
+        gpio_put(FLUX_PIN, false);
+        cal_printf("flux cal #%lu: MODE %s, SYNC low %lu/1000 (%lu syncs) with GPIO3 low, %lu/1000 (%lu syncs) with GPIO3 high\n",
+                   (unsigned long) cal_runs, gpio_get(MODE_PIN) ? "high (read)" : "LOW (write)",
+                   (unsigned long) l_lo, (unsigned long) e_lo, (unsigned long) l_hi, (unsigned long) e_hi);
+    }
     if (!gpio_get(MODE_PIN))
     {
-        cal_printf("flux cal: MODE is low (write mode) - is wire A / Q6 right? using defaults\n");
+        // the PIO sends no pulses in write mode: try again later
+        cal_printf("flux cal: MODE is low (write mode) - no test possible now, will retry (wire A / Q6?)\n");
+        flux_ok = false;
+        return false;
     }
     const uint32_t div = flux_div_q8_for_cell(clk_hz, CAL_CELL_NS);
     cal_printf("flux cal: clk %lu Hz, div %lu.%03lu, expect %lu syncs per %u us\n",
@@ -461,7 +490,8 @@ bool flux_calibrate(void)
     const uint best = (npass[1] > npass[0]) ? 1u : 0u;
     if (0 == npass[best])
     {
-        cal_printf("flux cal: no pulse shape works - no flux output (mod done? see doc/flux-mod-1541-II.pdf)\n");
+        cal_printf("flux cal: no pulse shape works - no flux output, retry in %u s (mod done? see doc/flux-mod-1541-II.pdf)\n",
+                   CAL_RETRY_US / 1000000u);
         flux_pin_release();
         flux_ok = false;
         return false;
@@ -564,6 +594,19 @@ static void write_byte_at(const uint32_t idx, const uint8_t byte, const uint64_t
 static void process_captures(const uint64_t now)
 {
     const uint32_t w = cap_wr_index();
+    if ((0 != cap_last_us) && ((now - cap_last_us) > CAP_STALE_US))
+    {
+        // the main loop was away too long: the DMA may have overwritten
+        // snapshots that were not read - drop them rather than write stale
+        // bytes into a track
+        if (cap_rd != w)
+        {
+            st_cap_lost += (w - cap_rd) & CAP_RING_MASK;
+            cap_rd = w;
+            wr_wait_since = 0;
+        }
+    }
+    cap_last_us = now;
     while (cap_rd != w)
     {
         const uint16_t v = cap_ring[cap_rd];
@@ -600,6 +643,17 @@ void flux_service(void)
 {
     const uint64_t now = time_us_64();
 
+    if (!flux_ok && (now >= cal_next_us))
+    {
+        // no working pulse shape yet (drive off at start, or DOS busy):
+        // try again whenever the drive is in read mode
+        cal_next_us = now + CAL_RETRY_US;
+        if (gpio_get(MODE_PIN))
+        {
+            (void) flux_calibrate();
+        }
+    }
+
     if (flux_ok)
     {
         const bool motor = get_motor_status();
@@ -630,10 +684,16 @@ void flux_service(void)
                 } else {
                     const uint32_t off = flux_angle_byte(now, len);
                     stream_play(key, data, len, off, flux_div_q8(clk_hz, (uint32_t) len * 8u));
-                    printf("flux: track %u%s, %u bytes, byte %lu, div %lu.%03lu, W %lu\n",
-                           (key >> 1) + 1, (key & 1) ? ".5" : "", len, (unsigned long) off,
-                           (unsigned long) (seg.div >> 8), (unsigned long) ((seg.div & 0xFF) * 1000u / 256u),
-                           (unsigned long) seg.w);
+                    ++st_steps;
+                    if ((now - step_print_us) >= STEP_PRINT_US)
+                    {
+                        // (rate limited: a blocking print here would delay the next step)
+                        step_print_us = now;
+                        printf("flux: track %u%s, %u bytes, byte %lu, div %lu.%03lu, W %lu\n",
+                               (key >> 1) + 1, (key & 1) ? ".5" : "", len, (unsigned long) off,
+                               (unsigned long) (seg.div >> 8), (unsigned long) ((seg.div & 0xFF) * 1000u / 256u),
+                               (unsigned long) seg.w);
+                    }
                 }
             }
         }
@@ -647,20 +707,20 @@ void flux_debug_service(void)
     if (!cal_log_shown && stdio_usb_connected())
     {
         cal_log_shown = true;
-        printf("\n1541-FluxPico flux mode. Calibration at start:\n%s", cal_log);
+        printf("\n1541-FluxPico flux mode. Last calibration:\n%s", cal_log);
     }
     if (now < st_next_us)
     {
         return;
     }
     st_next_us = now + 2000000u;
-    if (st_read || st_wr || st_wr_lost)
+    if (st_read || st_wr || st_wr_lost || st_cap_lost || st_steps)
     {
-        printf("flux: 2s: %lu bytes read, %lu headers, %lu written, %lu lost, %lu restarts\n",
+        printf("flux: 2s: %lu bytes read, %lu headers, %lu written, %lu write lost, %lu capture lost, %lu track changes\n",
                (unsigned long) st_read, (unsigned long) st_hdr, (unsigned long) st_wr,
-               (unsigned long) st_wr_lost, (unsigned long) st_restart);
+               (unsigned long) st_wr_lost, (unsigned long) st_cap_lost, (unsigned long) st_steps);
     }
-    st_read = st_hdr = st_wr = st_wr_lost = st_restart = 0;
+    st_read = st_hdr = st_wr = st_wr_lost = st_cap_lost = st_steps = st_restart = 0;
 }
 
 #endif
