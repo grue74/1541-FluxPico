@@ -2,7 +2,7 @@
 // For more details, see: https://aka.ms/vscode-remote/devcontainer.json
 
 {
-  "name": "repico-github-devenv",
+  "name": "fluxpico-github-devenv",
   "image": "mcr.microsoft.com/vscode/devcontainers/base:ubuntu-24.04",
   "appPort": [],
   "customizations": {

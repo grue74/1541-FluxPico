@@ -323,7 +323,7 @@ void create_menu_image(const char* menu_path, DIR* dir_obj, uint8_t* id1_p, uint
     last_track = fill_tracks_with_file(fe3loader_track, (uint8_t*) &fe3loader_prg[0],    fe3loader_prg_len,    FILL_DOWN, num_max_tracks, my_id1, my_id2);
 
     memset(d64_sector_puffer, 0, sizeof(d64_sector_puffer));
-    generate_bam("- 1541 REPICO -", id_buffer);
+    generate_bam(" 1541 FLUXPICO  ", id_buffer);
     // create a file-entry in the directory...
     generate_directory_entry("SELECTOR", CBMDOS_TYPE_PRG, SELECTOR_TRACK  ,0,((uint16_t) (selector_prg_len/254))+1);
     generate_directory_entry("P",        CBMDOS_TYPE_PRG, menu_pal_track  ,0,((uint16_t) (menu_c64_pal_prg_len/254))+1);
@@ -514,7 +514,7 @@ void create_textmenu_image(const char* menu_path, FIL* file_obj, FILINFO* file_i
     last_track = fill_tracks_with_file(fe3loader_track, (uint8_t*) &fe3loader_prg[0],    fe3loader_prg_len,    FILL_DOWN, num_max_tracks, my_id1, my_id2);
 
     memset(d64_sector_puffer, 0, sizeof(d64_sector_puffer));
-    generate_bam("- 1541 REPICO -", id_buffer);
+    generate_bam(" 1541 FLUXPICO  ", id_buffer);
     // create a file-entry in the directory...
     generate_directory_entry("SELECTOR", CBMDOS_TYPE_PRG, SELECTOR_TRACK  ,0,((uint16_t) (selector_prg_len/254))+1);
     generate_directory_entry("P",        CBMDOS_TYPE_PRG, menu_pal_track  ,0,((uint16_t) (menu_c64_pal_prg_len/254))+1);

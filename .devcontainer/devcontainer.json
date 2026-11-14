@@ -1,5 +1,5 @@
 {
-  "name": "1541-repico-devenv",
+  "name": "1541-fluxpico-devenv",
   "image": "mcr.microsoft.com/vscode/devcontainers/base:ubuntu-24.04",
   "appPort": [],
   "forwardPorts": [8000],

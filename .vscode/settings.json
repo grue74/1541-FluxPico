@@ -1,5 +1,5 @@
 {
-    "cmake.sourceDirectory": "/workspaces/1541-rePico/firmware",
+    "cmake.sourceDirectory": "/workspaces/1541-FluxPico/firmware",
     "cmake.options.statusBarVisibility": "visible",
     "cmake.options.advanced": {
         "build": {

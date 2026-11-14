@@ -28,7 +28,7 @@ set(PICO_BOARD pico2 CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(1541-rePico C CXX ASM)
+project(1541-FluxPico C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -37,22 +37,22 @@ add_subdirectory(./buildtools)
 
 add_subdirectory(./SoftwareC64)
 
-add_executable(1541-rePico)
+add_executable(1541-FluxPico)
 
-add_dependencies(1541-rePico GenSelector GenMenuC64Pal GenMenuC64Ntsc GenMenuC16 GenMenuP4 GenMenuVIC20 GenIntro GenFe3loader)
+add_dependencies(1541-FluxPico GenSelector GenMenuC64Pal GenMenuC64Ntsc GenMenuC16 GenMenuP4 GenMenuVIC20 GenIntro GenFe3loader)
 
 # Add executable. Default name is the project name, version 0.1
 file(GLOB_RECURSE mysources  CONFIGURE_DEPENDS "src/*.c")
 file(GLOB_RECURSE myincludes CONFIGURE_DEPENDS "include/*.h")
 
-target_sources(1541-rePico PUBLIC ${mysources} ${myincludes})
+target_sources(1541-FluxPico PUBLIC ${mysources} ${myincludes})
 
-pico_set_program_name(1541-rePico "1541-rePico")
-pico_set_program_version(1541-rePico "0.1")
+pico_set_program_name(1541-FluxPico "1541-FluxPico")
+pico_set_program_version(1541-FluxPico "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(1541-rePico 0)
-pico_enable_stdio_usb(1541-rePico 1)
+pico_enable_stdio_uart(1541-FluxPico 0)
+pico_enable_stdio_usb(1541-FluxPico 1)
 
 # NOTE: for this to work, src\ff15\source\ffconf.h must be removed or renamed.
 # target_include_directories(no-OS-FatFS-SD-SDIO-SPI-RPi-Pico BEFORE INTERFACE
@@ -62,14 +62,14 @@ pico_enable_stdio_usb(1541-rePico 1)
 add_subdirectory(no-OS-FatFS-SD-SDIO-SPI-RPi-Pico/src build)
 
 # Add the standard include files to the build
-target_include_directories(1541-rePico PRIVATE
+target_include_directories(1541-FluxPico PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Add the standard library to the build
 # Add any user requested libraries
-target_link_libraries(1541-rePico 
+target_link_libraries(1541-FluxPico 
         pico_stdlib
         pico_multicore
         hardware_spi
@@ -84,13 +84,13 @@ target_link_libraries(1541-rePico
         no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
         )
 
-pico_add_extra_outputs(1541-rePico)
+pico_add_extra_outputs(1541-FluxPico)
 
 #pass PCB_VERSION-value to the compiler
 # set version to 17 as default
 if(NOT DEFINED PCB_VERSION)
    set(PCB_VERSION 17)
 endif()
-target_compile_definitions(1541-rePico PUBLIC PCB_VERSION=${PCB_VERSION})
+target_compile_definitions(1541-FluxPico PUBLIC PCB_VERSION=${PCB_VERSION})
 
 

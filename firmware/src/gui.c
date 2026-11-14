@@ -284,7 +284,7 @@ void check_menu_events(const uint16_t menu_event)
                             menu_refresh();
                             break;
                         }
-                        fr = f_open(&fd, "1541-repico.g64", FA_CREATE_ALWAYS|FA_WRITE);
+                        fr = f_open(&fd, "1541-fluxpico.g64", FA_CREATE_ALWAYS|FA_WRITE);
                         display_string("G64 file open...");
                         if (FR_OK == fr)
                         {
@@ -310,7 +310,7 @@ void check_menu_events(const uint16_t menu_event)
                         sleep_ms(3000);
                         display_clear();
                         display_home();
-                        fr = f_open(&fd, "1541-repico.d64", FA_CREATE_ALWAYS|FA_WRITE);
+                        fr = f_open(&fd, "1541-fluxpico.d64", FA_CREATE_ALWAYS|FA_WRITE);
                         display_string("D64 file open...");
                         if (FR_OK == fr)
                         {

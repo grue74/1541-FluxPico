@@ -44,7 +44,7 @@ enum GUI_MODE{GUI_INFO_MODE, GUI_MENU_MODE, GUI_FILE_BROWSER, GUI_SELECTOR};
 #define disp_unsupportedimg_s "Img unsupported!"
 
 #define disp_versiontxt_p     0,0
-#define disp_versiontxt_s     "- 1541-rePico -"
+#define disp_versiontxt_s     " 1541-FluxPico  "
 #define disp_firmwaretxt_p    0,1
 #define disp_firmwaretxt_s    "Firmware:"
 

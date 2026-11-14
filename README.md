@@ -1,5 +1,14 @@
-# 1541-rePico
+# 1541-FluxPico
 replacement of analog-part of Commodore 1541-Floppy devices based on Pi-Pico(2)
+
+**1541-FluxPico is a fork of [1541-rePico](https://github.com/fook42/1541-rePico) by F00K42 and PeiselUlli.**
+It keeps the plug-in board (VIA socket) but changes how disks are played: tracks are held as flux
+streams and the Pico runs the 1541 read circuit on them at the density the drive selects (DS0/DS1),
+with the output timed by PIO. Work in progress, see [doc/bitstream-plan.md](doc/bitstream-plan.md),
+[README-changes.md](README-changes.md) and the DS0/DS1 board mod in
+[doc/density-select-mod.pdf](doc/density-select-mod.pdf). Licensed under GPL-3.0 like the original.
+
+The rest of this README is from 1541-rePico.
 
 ## preface/credits ##
 this project was derived from the original 1541-rebuild from Thorsten Kattanek (https://github.com/ThKattanek/1541-rebuild) !

@@ -12,7 +12,7 @@
 #   drive_harness path/to/bbsb.g64
 
 cmake_minimum_required(VERSION 3.13)
-project(rePico_host_tests C)
+project(FluxPico_host_tests C)
 
 set(CMAKE_C_STANDARD 11)
 set(FW ${CMAKE_CURRENT_SOURCE_DIR}/..)

@@ -1,9 +1,10 @@
 /////////////////////////////////////////////////
-// 1541-rePico
+// 1541-FluxPico (fork of 1541-rePico)
 /////////////////////////////////////////////////
 // author: F00K42
 // last changed: 2026/10/28
-// repo: https://github.com/fook42/1541-rePico
+// repo: https://github.com/grue74/1541-FluxPico
+// original: https://github.com/fook42/1541-rePico
 /////////////////////////////////////////////////
 
 
@@ -257,7 +258,7 @@ int main()
 
     sleep_ms(500);
 
-    printf("1541repico boot\n");
+    printf("1541fluxpico boot\n");
 
     if (display_init())
     {

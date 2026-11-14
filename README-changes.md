@@ -1,4 +1,4 @@
-# 1541-rePico – changes: bit-level G64 emulation and more
+# 1541-FluxPico – changes from 1541-rePico: bit-level G64 emulation and more
 
 This document describes a set of changes to the firmware (not yet committed):
 
