@@ -328,11 +328,14 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
                 }
             }
 
+#ifndef FLUX_MODE
             // protection loaders reading tracks at another density
+            // (FLUX_MODE: the drive's gate array decodes at the real density)
             if (0 <= last_track)
             {
                 apply_density_rules(fileinfo.fname);
             }
+#endif
         }
         break;
 

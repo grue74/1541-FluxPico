@@ -9,6 +9,7 @@
 #include "drive.h"
 #include "gcr_resolve.h"
 #include "gcr.h"
+#include "flux.h"
 
 /////////////////////////////////////////////////////////////////////
 // bit-level disk emulation
@@ -243,6 +244,9 @@ int64_t steppertimer_callback(alarm_id_t id, void *user_data)
 
 void service_track_resolver(void)
 {
+#ifdef FLUX_MODE
+    return;     // the gate array decodes the flux - no framing needed
+#endif
     const uint32_t req = res_req_gen;
     if ((req == res_done_gen) || !is_image_mount)
     {
@@ -653,9 +657,14 @@ void init_control_signals(void)
     // BYTE_READY_PORT &= ~(1<<BYTE_READY);
 
     gpio_init(GPIO_SYNC);
+#ifdef FLUX_MODE
+    // the gate array drives SYNC (and BYTE READY and port A): inputs only
+    gpio_set_dir(GPIO_SYNC, GPIO_IN);
+#else
     gpio_set_dir(GPIO_SYNC, GPIO_OUT);
 
     gpio_set_drive_strength(GPIO_SYNC, GPIO_DRIVE_STRENGTH_12MA);
+#endif
 
     // Als Eingang schalten
     gpio_init_mask(PAPORT_MASK);
@@ -669,6 +678,7 @@ void init_control_signals(void)
     gpio_set_pulls(GPIO_PAPORT+7, true, false);
     gpio_set_dir_in_masked(PAPORT_MASK); // should set all 8 bits to input
 
+#ifndef FLUX_MODE
     gpio_set_drive_strength(GPIO_PAPORT  , GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(GPIO_PAPORT+1, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(GPIO_PAPORT+2, GPIO_DRIVE_STRENGTH_12MA);
@@ -677,6 +687,7 @@ void init_control_signals(void)
     gpio_set_drive_strength(GPIO_PAPORT+5, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(GPIO_PAPORT+6, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(GPIO_PAPORT+7, GPIO_DRIVE_STRENGTH_12MA);
+#endif
 
     gpio_init(GPIO_SOE);
     gpio_set_pulls(GPIO_SOE, true, false);
@@ -689,12 +700,14 @@ void init_control_signals(void)
 
 /////////////////////////////////////////////////////////////////////
 
+#ifndef FLUX_MODE     // FLUX_MODE: GPIO3 is the flux output (flux.c)
 void init_soe_gatearray(void)
 {
     gpio_init(GPIO_SOE_GA);
     gpio_set_dir(GPIO_SOE_GA, GPIO_OUT);
     set_soe_gatearray();
 }
+#endif
 
 /////////////////////////////////////////////////////////////////////
 
@@ -709,7 +722,9 @@ void init_bytetimer(void)
 void start_bytetimer(uint8_t half_track)
 {
     (void) half_track;
-
+#ifdef FLUX_MODE
+    flux_image_start();
+#else
     stop_bytetimer();
 
     ++res_image_gen;            // framing of the old image is invalid now
@@ -719,17 +734,22 @@ void start_bytetimer(uint8_t half_track)
     next_us   = time_us_64() + 100;
     alarm_target_us = next_us;
     disk_alarm = add_alarm_at(from_us_since_boot(next_us), disk_alarm_callback, NULL, true);
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////
 
 void stop_bytetimer(void)
 {
+#ifdef FLUX_MODE
+    flux_image_stop();
+#else
     if (disk_alarm > 0)
     {
         (void) cancel_alarm(disk_alarm);
     }
     disk_alarm = 0;
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -744,6 +764,10 @@ void init_sound(void)
 ///////////////////////////////////////
 ///////// ISR
 ///////////////////////////////////////
+
+// the byte-level playback below drives SYNC, BYTE READY and port A. In
+// FLUX_MODE the gate array drives them - this code must not exist there.
+#ifndef FLUX_MODE
 
 static inline uint64_t read_event_us(void)
 {
@@ -1236,3 +1260,5 @@ int64_t disk_alarm_callback(alarm_id_t id, void *user_data)
     // negative: relative to the time this alarm was scheduled for -> no drift
     return -(int64_t) (target - scheduled);
 }
+
+#endif  // !FLUX_MODE

@@ -73,6 +73,18 @@ int64_t steppertimer_callback(alarm_id_t id, void *user_data);
 void start_stepper_timer(void);
 
 /////////////
+#ifdef FLUX_MODE
+// FLUX_MODE: the drive's gate array drives BYTE READY, SYNC and port A, and
+// GPIO3 is the flux output. These outputs must never be used: each use is a
+// build error (undeclared function).
+#define set_byte_ready()        flux_mode_forbids_this_output()
+#define clear_byte_ready()      flux_mode_forbids_this_output()
+#define set_soe_gatearray()     flux_mode_forbids_this_output()
+#define clear_soe_gatearray()   flux_mode_forbids_this_output()
+#define set_sync()              flux_mode_forbids_this_output()
+#define clear_sync()            flux_mode_forbids_this_output()
+#define out_gcr_byte(gcr_byte)  flux_mode_forbids_this_output()
+#else
 #define set_byte_ready()    gpio_set_dir(GPIO_BRDY,GPIO_IN)    // HiZ
 #define clear_byte_ready()  {gpio_set_dir(GPIO_BRDY,GPIO_OUT);gpio_put(GPIO_BRDY,false);}   // auf Ground ziehen
 
@@ -82,6 +94,11 @@ void start_stepper_timer(void);
 
 #define set_soe_gatearray()     gpio_put(GPIO_SOE_GA,true)
 #define clear_soe_gatearray()   gpio_put(GPIO_SOE_GA,false)
+#endif
+#ifdef FLUX_MODE
+#define get_soe_status()    gpio_get(GPIO_SOE)
+#define get_so_status()     gpio_get(GPIO_OE)
+#endif
 
 // WPS will be generated via inverter 74ls04 on 1541*-mainboard
 // ... thus we send the inverse here (clear_wps = "1" on WPS)
@@ -90,10 +107,12 @@ void start_stepper_timer(void);
 
 #define get_motor_status()  gpio_get(GPIO_MTR)
 
+#ifndef FLUX_MODE
 #define set_sync()          gpio_put(GPIO_SYNC,true)
 #define clear_sync()        gpio_put(GPIO_SYNC,false)
 
 #define out_gcr_byte(gcr_byte)  gpio_put_masked(PAPORT_MASK,gcr_byte<<GPIO_PAPORT)
+#endif
 #define in_gcr_byte()       (gpio_get_all()&PAPORT_MASK)>>GPIO_PAPORT
 
 #define enable_write_protection()   {clear_wps();floppy_wp=true;}

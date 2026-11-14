@@ -67,6 +67,29 @@ BYTE = pin 40 (the schematic shows the 42-pin numbering, CLR = 33).
 The buzzer stays. **After the mod the old firmware must not run**: the 74LVC4245 then always drives
 GPIO8-15, and the old firmware drives them too.
 
+## Firmware status (milestone 1, `FLUX_MODE`, on by default)
+
+Done in `firmware/src/flux.c` (math in `include/flux_math.h`, host test `tests/flux_math_test.c`):
+
+* the raw track bytes go by DMA (two channels chained in a circle, re-armed once per revolution)
+  to a PIO state machine: one bitcell = 64 PIO cycles, a pulse on GPIO3 for every 1-bit
+* PIO clock divider from the track length: a revolution is 200 ms, the angle is global and kept
+  on head steps; the pulse keeps its width in ns on every track
+* pulses only in read mode: the PIO checks MODE (GPIO1) with `jmp pin` for every bit
+* calibration at start (display "Flux calibrate.."): a test pattern with syncs is played with
+  active-low/high pulses of 100-1500 ns; the gate array's SYNC (GPIO2) shows which work, the middle
+  of the working range is used. No answer: GPIO3 stays low and nothing is played
+* a second state machine takes GPIO1..16 at every falling BYTE READY (MODE, SYNC, port A) into a DMA
+  ring: read bytes feed the sector display, write bytes go into the track at their bit position
+  (the first BYTE READY of a write is timed by a GPIO interrupt)
+* SYNC, BYTE READY and port A can not be driven by the Pico in this build (the macros are build errors)
+* `.den` rules are not applied: the gate array decodes at the real density
+* USB log: calibration table (printed again when a terminal connects), track changes, motor,
+  2-second statistics (bytes read, headers, bytes written, lost)
+
+Not yet: random flux in no-flux areas (weak bits) - RapidLok (Law of the West) and V-Max will
+probably still fail; per-byte speed maps; a menu entry to repeat the calibration.
+
 ## Phase 2 - firmware: flux output
 
 * build option `FLUX_MODE`: GPIO8-15 always inputs (the 74LVC4245 drives them), BRDY and SYNC never

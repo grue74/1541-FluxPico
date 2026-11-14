@@ -44,6 +44,7 @@
 #include "files.h"
 #include "settings.h"
 #include "gui.h"
+#include "flux.h"
 
 #define START_MESSAGE_TIME 1500
 
@@ -180,6 +181,12 @@ uint8_t current_stepper_phase(void)
 
 void gpio_callback(uint gpio, uint32_t events)
 {
+#ifdef FLUX_MODE
+    if (flux_gpio_irq(gpio, events))
+    {
+        return;     // write start (MODE / BYTE READY)
+    }
+#endif
     if ((GPIO_STP0==gpio) || (GPIO_STP1==gpio))
     {
         // STP0 or STP1 changed. A step can change both lines at once, and
@@ -280,8 +287,12 @@ int main()
     // Steursignale BYTE_READY, SYNC und SOE Initialisieren
     init_control_signals();
 
+#ifdef FLUX_MODE
+    flux_init();                // GPIO3 = flux output, capture of BYTE READY bytes
+#else
     init_soe_gatearray();
     clear_soe_gatearray();
+#endif
 
     init_bytetimer();
 
@@ -310,6 +321,17 @@ int main()
 
     sleep_ms(START_MESSAGE_TIME);
 
+#ifdef FLUX_MODE
+    // find the pulse shape the gate array needs (no C64 or disk needed)
+    display_clear();
+    display_home();
+    display_string("Flux calibrate..");
+    const bool cal = flux_calibrate();
+    display_setcursor(0, 1);
+    display_string(cal ? "Flux OK         " : "Flux: no answer!");
+    sleep_ms(cal ? 500 : 3000);
+#endif
+
     display_clear();
     display_home();
 
@@ -326,9 +348,15 @@ int main()
     multicore_launch_core1( start_gui_core );
     while (true) {
         check_stepper_signals();
+#ifdef FLUX_MODE
+        flux_service();             // track under the head -> flux stream, bytes the drive writes
+        settings_service();         // write changed settings to flash
+        flux_debug_service();       // flux events on USB serial
+#else
         service_track_resolver();   // bit-level framing of the current track
         settings_service();         // write changed settings to flash
         drive_debug_service();      // event log on USB serial (DEBUG_DRIVE_LOG builds only)
+#endif
     }
 }
 /////////////////////////////////////////////////////////////////////

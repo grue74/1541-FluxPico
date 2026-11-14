@@ -93,4 +93,12 @@ if(NOT DEFINED PCB_VERSION)
 endif()
 target_compile_definitions(1541-FluxPico PUBLIC PCB_VERSION=${PCB_VERSION})
 
+# FLUX_MODE: the Pico sends the track as flux pulses into the drive's gate
+# array (needs the board mod in doc/flux-mod-1541-II.pdf). OFF builds the
+# old byte-level playback for an unmodified rePico board.
+option(FLUX_MODE "flux stream into the drive's own read circuit" ON)
+if(FLUX_MODE)
+   target_compile_definitions(1541-FluxPico PUBLIC FLUX_MODE)
+endif()
+
 
