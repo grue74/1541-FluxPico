@@ -63,7 +63,7 @@ def table(rows, widths, header=True, size=8.5):
     return t
 
 
-from figs import fig_bottom_full, fig_bottom_zoom, fig_top_buzzer, resistor  # noqa: E402
+from figs import fig_bottom_full, fig_bottom_zoom, fig_module, fig_top_buzzer  # noqa: E402
 
 
 # --- schematic of the modification -----------------------------------------
@@ -86,19 +86,20 @@ def fig_schematic():
 
     vx, vw = 4, 92
     px, pw = W - 102, 98
-    box(vx, 26, vw, 88, ['VIA2 6522 (drive)', '', 'PB5 = DS0, pin 15', '', 'PB6 = DS1, pin 16'])
+    box(vx, 26, vw, 88, ['VIA2 6522 (drive)', '', 'PB5 = DS0, pin 15', '', 'PB6 = DS1, pin 16', '', '+5V pin 20'])
     box(px, 26, pw, 88, ['Raspberry Pi Pico 2', '', 'GPIO17 (pin 22)', '= J8 pin 2, was buzzer', '',
-                         'GPIO3 (pin 5)', 'was SOE_GA'])
-    for yy, col, name, gp, frac in ((92, C_DS0, 'DS0', 'GPIO17', 0.58), (52, C_DS1, 'DS1', 'GPIO3', 0.74)):
-        x0, x1 = vx + vw, px
-        node = x0 + (x1 - x0) * frac
-        resistor(d, x0, yy, node - 30, yy, col, '10k')
-        d.add(Line(node - 30, yy, x1, yy, strokeColor=col, strokeWidth=1.4))
-        d.add(Circle(node, yy, 2.2, fillColor=col, strokeColor=None))
-        resistor(d, node, yy, node, yy - 22, col, '22k')
-        gnd(node, yy - 22)
-        d.add(String(x0 + 4, yy + 4, name, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col))
-        d.add(String(x1 - 4, yy + 4, gp, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col, textAnchor='end'))
+                         'GPIO3 (pin 5)', 'was SOE_GA', '3.3V = J8 pin 1'])
+    lx, lw = vx + vw + 52, 118
+    box(lx, 30, lw, 80, ['level shifter module', '4 x BSS138', '10k pull-ups both sides', '',
+                         'HV = 5V      LV = 3.3V', 'GND to J8 pin 3'], size=7)
+    for yy, col, name, gp, ch in ((92, C_DS0, 'DS0', 'GPIO17', '1'), (52, C_DS1, 'DS1', 'GPIO3', '2')):
+        d.add(Line(vx + vw, yy, lx, yy, strokeColor=col, strokeWidth=1.4))
+        d.add(Line(lx + lw, yy, px, yy, strokeColor=col, strokeWidth=1.4))
+        d.add(String(vx + vw + 4, yy + 4, name, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col))
+        d.add(String(lx - 3, yy + 4, 'HV' + ch, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col,
+                     textAnchor='end'))
+        d.add(String(lx + lw + 3, yy + 4, 'LV' + ch, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col))
+        d.add(String(px - 4, yy + 4, gp, fontName='Helvetica-Bold', fontSize=7.5, fillColor=col, textAnchor='end'))
     d.add(String(4, 12, 'SOE_GA: the trace from Pico pin 5 to R19/Q9 is cut, R19 pad 2 (the R19/Q9 side) is wired '
                         'to GND.', fontName='Helvetica', fontSize=7.3, fillColor=C_SOE))
     d.add(String(4, 2, 'The firmware always drove SOE_GA low, so the 1541-II gate array sees the same level as '
@@ -175,7 +176,7 @@ def fig_cells():
 
 def build():
     story = []
-    story.append(P('1541-rePico: connecting the density select lines', H1))
+    story.append(P('1541-FluxPico: connecting the density select lines', H1))
     story.append(P('Instructions for option 1 (hardware modification, PCB v1.7) and option 2 (firmware that uses '
                    'the lines). Option 3, the per-image <b>.den</b> rules, is already in the firmware; see the last '
                    'page.', BODY))
@@ -184,7 +185,7 @@ def build():
     story.append(P('Why', H2))
     story.append(P('The 1541 has four read clocks ("densities"). The drive selects one with two VIA2 port B lines, '
                    'PB5 (DS0) and PB6 (DS1). DOS selects the density that matches the speed zone of the track. The '
-                   'rePico board cannot see these lines: on PCB v1.7 they only pass through the VIA socket (IC1 pins '
+                   'board cannot see these lines: on PCB v1.7 they only pass through the VIA socket (IC1 pins '
                    '15/16, header P1 pins 15/16). The firmware therefore always plays a track at the rate it was '
                    'recorded with.', BODY))
     story.append(table([
@@ -219,20 +220,24 @@ def build():
     story.append(Spacer(1, 4))
     story.append(fig_schematic())
     story.append(P('Figure 2: the modification as a circuit.', CAP))
-    story.append(P('<b>Only for PCB v1.7.</b> On v1.6 GPIO17 is the SD card chip select. The firmware must be built '
-                   'for the modified board (option 2); until then the lines are simply not used.', WARN))
+    story.append(P('<b>Only for PCB v1.7.</b> On v1.6 GPIO17 is the SD card chip select.', WARN))
+    story.append(P('<b>Firmware first.</b> The old firmware (and the 1541-rePico test builds) drive GPIO3 (SOE_GA) '
+                   'and GPIO17 (buzzer) as outputs. The level shifter passes a low level in both directions, so '
+                   'with such a firmware the Pico pulls DS0/DS1 low and the drive reads at the wrong density. Flash '
+                   'the FluxPico firmware built for the mod (inputs on GPIO3/GPIO17) <b>before</b> connecting the '
+                   'module, and do not go back to an older firmware while it is connected.', WARN))
     story.append(P('Parts and tools', H2))
     story.append(table([
         ['qty', 'part', 'note'],
-        ['2', 'resistor 10 kOhm', 'in series with each VIA line: protects both sides, also when an old firmware '
-                                  'drives the pin as an output'],
-        ['2', 'resistor 22 kOhm', 'to GND: 5.0 V high level becomes 3.4 V at the Pico'],
-        ['', 'thin insulated wire (wire-wrap, 0.25 mm)', 'about 15 cm'],
+        ['1', 'level shifter module, 4 channels, BSS138 (HV1-4 / LV1-4, HV, LV, GND)',
+         'the common blue module with 10k pull-ups on both sides; two channels are used'],
+        ['', 'double-sided foam tape', 'to fix the module on the top side where the buzzer was'],
+        ['', 'thin insulated wire (wire-wrap, 0.25 mm)', 'about 40 cm, 7 wires'],
         ['', 'sharp knife, soldering iron, multimeter', 'desoldering braid or pump for the buzzer']],
-        [12 * mm, 60 * mm, 94 * mm]))
+        [12 * mm, 70 * mm, 84 * mm]))
     story.append(Spacer(1, 4))
-    story.append(P('With 10k/22k a VIA high level of 5.0 V gives 3.44 V and 3.5 V gives 2.4 V at the Pico; both are '
-                   'read as high (the RP2350 needs about 2.2 V). A low level stays below 0.3 V.', SMALL))
+    story.append(P('The module replaces the 10k/22k dividers of the first version of this document. The VIA high '
+                   'level then does not matter: the Pico sees 3.3 V for high and about 0 V for low.', SMALL))
 
     story.append(P('Step 1: measure before changing anything', H2))
     story.append(P('Put the board into the drive as usual. Use DOS commands to move the head and measure DS0 (VIA '
@@ -246,9 +251,6 @@ def build():
         ['PRINT#15,"U1 2 0 25 0"', 'track 25', 'low', 'high', '1'],
         ['PRINT#15,"U1 2 0 31 0"', 'track 31', 'low', 'low', '0']],
         [50 * mm, 22 * mm, 24 * mm, 24 * mm, 18 * mm]))
-    story.append(Spacer(1, 4))
-    story.append(P('Write down the high level. 4.5-5.0 V is normal. If it is below 3.5 V, use 47 kOhm instead of '
-                   '22 kOhm to GND (a larger resistor to GND divides less: 3.0 V then still gives 2.5 V at the Pico).', SMALL))
 
     story.append(KeepTogether([P('Step 2: orientation', H2),
                                Image(PHOTO_PCB, width=150 * mm, height=150 * mm * 1148 / 2040),
@@ -256,12 +258,13 @@ def build():
                                  'on the bottom.', CAP)]))
 
     story.append(PageBreak())
-    story.append(P('Step 3: free GPIO3 and connect DS1', H2))
+    story.append(P('Step 3: free GPIO3 (cut SOE_GA)', H2))
     story.append(fig_bottom_full())
     story.append(P('Figure 4: bottom side, drawn from the KiCad file and mirrored as you see it when the board lies '
-                   'upside down. The red trace is SOE_GA from Pico pin 5 to R19/Q9.', CAP))
+                   'upside down. The red trace is SOE_GA from Pico pin 5 to R19/Q9. The circles are the points the '
+                   'module wires are soldered to.', CAP))
     story.append(KeepTogether([fig_bottom_zoom(),
-                               P('Figure 5: zoom. Dashed lines are the new wires.', CAP)]))
+                               P('Figure 5: zoom. The dashed line is the new GND wire.', CAP)]))
     story.append(P('1. Remove the Pico 2 from its socket strips and the board from the drive.', BODY))
     story.append(P('2. <b>Cut</b> the SOE_GA trace on the bottom side between the Pico pin 5 socket pad and R19 (red '
                    'mark): two cuts about 1 mm apart, remove the copper between them. The trace is 0.2 mm wide and '
@@ -269,28 +272,41 @@ def build():
     story.append(P('3. Check with the meter: Pico pin 5 pad to R19 pad 2 must be open now.', BODY))
     story.append(P('4. Solder a wire from <b>R19 pad 2</b> (the end next to Q9) to <b>GND</b>, for example the Pico '
                    'pin 3 socket pad. This keeps SOE_GA low, as the firmware did.', BODY))
-    story.append(P('5. From <b>VIA socket pin 16</b>: 10 kOhm to <b>Pico pin 5</b> socket pad; from Pico pin 5: '
-                   '22 kOhm to GND (Pico pin 3). Insulate the resistor leads (heat shrink) and keep them flat '
-                   'against the board: the bottom side sits on the 1541 board.', BODY))
 
     story.append(PageBreak())
-    story.append(P('Step 4: remove the buzzer and connect DS0', H2))
-    story.append(Image(PHOTO_BUZ, width=110 * mm, height=110 * mm * 1148 / 2040))
+    story.append(P('Step 4: remove the buzzer and fit the module', H2))
+    story.append(Image(PHOTO_BUZ, width=100 * mm, height=100 * mm * 1148 / 2040))
     story.append(P('Figure 6: assembled board, the buzzer BZ1 is at the corner next to the VIA socket.', CAP))
     story.append(fig_top_buzzer())
-    story.append(P('Figure 7: top side at BZ1/J8. The new wires are on the bottom side (figure 4).', CAP))
+    story.append(P('Figure 7: top side at BZ1/J8. J8 gives 3.3 V, GPIO17 and GND in one row for the LV side.', CAP))
+    story.append(KeepTogether([fig_module(),
+                               P('Figure 8: module wiring, pins as printed on the module (HV row at the top, LV row '
+                                 'at the bottom).', CAP)]))
     story.append(P('1. Desolder the buzzer BZ1 (two pins), or unplug the sound module from J8 if you use one.', BODY))
-    story.append(P('2. On the bottom side (figure 4): from <b>VIA socket pin 15</b> (DS0) a wire through the middle of the VIA '
-                   'socket to <b>J8 pin 2</b> (GPIO17), with 10 kOhm in it.', BODY))
-    story.append(P('3. 22 kOhm from <b>J8 pin 2</b> to <b>J8 pin 3</b> (GND), on the bottom side. J8 pin 1 is 3.3 V: do not use it.', BODY))
+    story.append(P('2. Fix the module with foam tape on the top side where the buzzer was, parts facing up, so no '
+                   'module pin touches the board. Keep it lower than the Pico.', BODY))
+    story.append(table([
+        ['module pin', 'wire to', 'where'],
+        ['LV', 'J8 pin 1 (3.3 V)', 'top side, J8'],
+        ['LV1', 'J8 pin 2 (GPIO17)', 'top side, J8'],
+        ['GND', 'J8 pin 3 (GND)', 'top side, J8'],
+        ['LV2', 'Pico pin 5 (GPIO3)', 'bottom side, socket pad (figure 4), wire around the board edge'],
+        ['HV', 'VIA socket pin 20 (+5 V)', 'bottom side (figure 4)'],
+        ['HV1', 'VIA socket pin 15 (DS0)', 'bottom side (figure 4)'],
+        ['HV2', 'VIA socket pin 16 (DS1)', 'bottom side (figure 4)'],
+        ['HV3, HV4, LV3, LV4', 'nothing', '']],
+        [32 * mm, 50 * mm, 84 * mm]))
+    story.append(Spacer(1, 4))
+    story.append(P('3. On the bottom side, keep the wires flat and away from the pins: the bottom side sits on the '
+                   '1541 board. Lead the wires to the top side around the board edge next to J8.', BODY))
 
     story.append(P('Step 5: check', H2))
-    story.append(P('1. Without the Pico: no short between DS0, DS1, GND, 3.3 V and 5 V. R19 pad 2 to GND: 0 Ohm. '
-                   'Pico pin 5 pad to GND: about 22 kOhm. J8.2 to GND: about 22 kOhm.', BODY))
-    story.append(P('2. Insert the Pico, put the board into the drive, power on. Repeat the table of step 1 and measure '
-                   'at Pico pin 5 (DS1) and J8 pin 2 (DS0): high about 3.4 V, low below 0.3 V.', BODY))
-    story.append(P('3. With the old firmware the beeper setting has no effect any more; the drive must work as before '
-                   '(the board pins now sit behind 10 kOhm). Normal loading must work: SOE_GA is still low.', BODY))
+    story.append(P('1. Without the Pico, board out of the drive: no short between DS0, DS1, GND, 3.3 V and 5 V. '
+                   'R19 pad 2 to GND: 0 Ohm. J8 pin 1 (3.3 V) to VIA pin 20 (5 V): no short.', BODY))
+    story.append(P('2. Insert the Pico with the mod firmware, put the board into the drive, power on. Repeat the table '
+                   'of step 1 and measure at Pico pin 5 (DS1) and J8 pin 2 (DS0): high about 3.3 V, low below '
+                   '0.3 V. On the VIA side the levels must be the same as in step 1.', BODY))
+    story.append(P('3. Normal loading must work as before: SOE_GA is still low.', BODY))
     story.append(P('For a next PCB revision', H3))
     story.append(P('Route DS0/DS1 through two more BSS138 level shifter channels (like the other VIA signals) to the '
                    'GPIOs used here, tie SOE_GA low on the board, and drop the buzzer or move it to an I2C port '
@@ -299,18 +315,19 @@ def build():
     # --- option 2
     story.append(PageBreak())
     story.append(P('Option 2: firmware for the modified board', H1))
+    story.append(P('<b>Note:</b> 1541-FluxPico goes further than this page: it holds tracks as flux streams and runs the read circuit at the live density, with the output timed by PIO (see <font face="Courier">doc/bitstream-plan.md</font>). The pins and the mod are the same.', NOTE))
     story.append(P('Once the lines are connected, the firmware can see the density the drive selects and convert a '
                    'track when it differs from the zone the track was recorded at. The converter from option 3 '
                    '(<font face="Courier">gcr_resample()</font> in <font face="Courier">src/gcr_resolve.c</font>) '
                    'already does the conversion; option 2 runs it at runtime instead of at load time.', BODY))
     story.append(fig_flow())
-    story.append(P('Figure 8: data flow with the density lines.', CAP))
+    story.append(P('Figure 9: data flow with the density lines.', CAP))
     story.append(P('Changes', H2))
     story.append(table([
         ['file', 'change'],
         ['include/pinout.h, CMakeLists.txt', 'new build option <font face="Courier">DENSITY_SENSE</font> (PCB v1.7 '
                                              'only): GPIO_DS0 = 17, GPIO_DS1 = 3; GPIO_SND and GPIO_SOE_GA not used'],
-        ['src/main.c, src/drive.c', 'inputs without pulls; no buzzer and no SOE_GA output in that build; hide the '
+        ['src/main.c, src/drive.c', 'inputs without pulls (the module has its own); no buzzer and no SOE_GA output in that build; hide the '
                                     'Beeper setting'],
         ['src/drive.c', 'read DS0/DS1 at every playback event (one GPIO read); when the density differs from '
                         'd64_track_zone of the track under the head, request a conversion like a head step'],
@@ -368,14 +385,14 @@ def build():
                    'differ from the recorded zone).', SMALL))
 
     doc = SimpleDocTemplate(OUT, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=16 * mm,
-                            bottomMargin=16 * mm, title='1541-rePico: density select lines',
-                            author='1541-rePico')
+                            bottomMargin=16 * mm, title='1541-FluxPico: density select lines',
+                            author='1541-FluxPico')
 
     def footer(canvas, doc_):
         canvas.saveState()
         canvas.setFont('Helvetica', 7.5)
         canvas.setFillColor(colors.HexColor('#666666'))
-        canvas.drawString(20 * mm, 9 * mm, '1541-rePico - density select lines (DS0/DS1)')
+        canvas.drawString(20 * mm, 9 * mm, '1541-FluxPico - density select lines (DS0/DS1)')
         canvas.drawRightString(A4[0] - 20 * mm, 9 * mm, 'page %d' % doc_.page)
         canvas.restoreState()
 

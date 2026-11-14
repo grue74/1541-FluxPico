@@ -175,16 +175,7 @@ def cut_mark(d, x, y):
 
 
 CUT_AT = (140.2, 78.6)                  # on the SOE_GA trace between Pico pin 5 and R19
-J_DS1 = (136.4, 77.33)                  # junction of the DS1 divider (between the P1 and U1 pin rows)
-
-
-def wires_ds1(d, v):
-    x16, y16 = _xy('IC1', 16)
-    x5, y5 = _xy('U1', 5)
-    x3, y3 = _xy('U1', 3)
-    path(d, v, [(x16, y16), (x16, J_DS1[1]), J_DS1, (x5, J_DS1[1]), (x5, y5)], C_DS1, res=(1, '10k'))
-    path(d, v, [J_DS1, (J_DS1[0], y3), (x3, y3)], C_DS1, res=(0, '22k'))
-    dot(d, v, J_DS1[0], J_DS1[1], C_DS1)
+C_5V = colors.HexColor('#B02060')
 
 
 def wire_gnd_link(d, v):
@@ -193,28 +184,16 @@ def wire_gnd_link(d, v):
     path(d, v, [(xr, yr), (xr, y3), (x3, y3)], C_GND, dash=(1.5, 1.5))
 
 
-def wires_ds0(d, v):
-    x15, y15 = _xy('IC1', 15)
-    xj2, yj2 = _xy('J8', 2)
-    xj3, yj3 = _xy('J8', 3)
-    xm = 121.8                           # inside the VIA socket, between its two pin rows
-    path(d, v, [(x15, y15), (xm, y15), (xm, 120.4), (xj2, 120.4), (xj2, yj2)], C_DS0, res=(1, '10k'))
-    path(d, v, [(xj2, yj2 - 1.6), (xj3, yj3 - 1.6)], C_DS0, res=(0, '22k'), dash=None)
-
-
 def fig_bottom_full():
     bx0, by0, bx1, by1 = B.outline
     v = View(bx0, by0, bx1, by1, 160 * mm, bottom=True)
-    labels = [('IC1', 15, C_DS0, 'VIA pin 15 = DS0', 40, -30),
-              ('IC1', 16, C_DS1, 'VIA pin 16 = DS1', 40, 26),
-              ('U1', 5, C_DS1, 'Pico pin 5 = GPIO3', -70, -40),
-              ('U1', 3, C_GND, 'Pico pin 3 = GND', -60, 24),
-              ('J8', 2, C_DS0, 'J8 pin 2 = GPIO17', -95, 36),
-              ('J8', 3, C_GND, 'J8 pin 3 = GND', -80, -20)]
+    labels = [('IC1', 15, C_DS0, 'VIA pin 15 = DS0 -> HV1', 40, -30),
+              ('IC1', 16, C_DS1, 'VIA pin 16 = DS1 -> HV2', 40, 26),
+              ('IC1', 20, C_5V, 'VIA pin 20 = +5V -> HV', 70, -6),
+              ('U1', 5, C_DS1, 'Pico pin 5 = GPIO3 -> LV2', -70, -40),
+              ('U1', 3, C_GND, 'Pico pin 3 = GND', -60, 24)]
 
     def extra(d, vv):
-        wires_ds0(d, vv)
-        wires_ds1(d, vv)
         wire_gnd_link(d, vv)
         cut_mark(d, *vv.p(*CUT_AT))
     return board_drawing(v, 'B.Cu', labels, extra,
@@ -223,25 +202,65 @@ def fig_bottom_full():
 
 def fig_bottom_zoom():
     v = View(126.5, 71.0, 148.5, 88.0, 160 * mm, bottom=True)
-    labels = [('IC1', 16, C_DS1, 'VIA pin 16 (DS1)', 24, 40),
-              ('IC1', 15, C_DS0, 'VIA pin 15 (DS0): wire to J8, see figure 4', -40, -44),
-              ('U1', 5, C_DS1, 'Pico pin 5 (GPIO3)', 24, -58),
+    labels = [('IC1', 16, C_DS1, 'VIA pin 16 (DS1) -> HV2', 24, 40),
+              ('IC1', 15, C_DS0, 'VIA pin 15 (DS0) -> HV1', -40, -44),
+              ('U1', 5, C_DS1, 'Pico pin 5 (GPIO3) -> LV2', 24, -58),
               ('U1', 3, C_GND, 'Pico pin 3 (GND)', 30, 34),
               ('R19', 2, C_SOE, 'R19 pad 2', -30, -44),
               ('Q9', 2, C_SOE, 'Q9', -24, 44)]
 
     def extra(d, vv):
-        wires_ds1(d, vv)
         wire_gnd_link(d, vv)
         cut_mark(d, *vv.p(*CUT_AT))
-    return board_drawing(v, 'B.Cu', labels, extra, title='Zoom, BOTTOM side: cut SOE_GA, DS1 to GPIO3')
+    return board_drawing(v, 'B.Cu', labels, extra, title='Zoom, BOTTOM side: cut SOE_GA, tie R19 pad 2 to GND')
+
+
+def fig_module():
+    """wiring of the 4-channel BSS138 level shifter module, pins as printed on it"""
+    W, H = 165 * mm, 190
+    d = Drawing(W, H)
+    mx, my, mw, mh = W / 2 - 80, 58, 160, 74
+    d.add(Rect(mx, my, mw, mh, rx=4, ry=4, fillColor=colors.HexColor('#2B4FA0'), strokeColor=C_TEXT, strokeWidth=1))
+    d.add(String(mx + mw / 2, my + mh / 2 - 3, '4 x BSS138, 10k pull-ups', fontName='Helvetica', fontSize=7,
+                 fillColor=colors.white, textAnchor='middle'))
+    hv = [('HV1', C_DS0, 'VIA pin 15 (DS0)'), ('HV2', C_DS1, 'VIA pin 16 (DS1)'), ('HV', C_5V, 'VIA pin 20 (+5V)'),
+          ('GND', C_GND, 'J8 pin 3 (GND)'), ('HV3', None, 'free'), ('HV4', None, 'free')]
+    lv = [('LV1', C_DS0, 'J8 pin 2 (GPIO17)'), ('LV2', C_DS1, 'Pico pin 5 (GPIO3)'), ('LV', C_5V, 'J8 pin 1 (3.3V)'),
+          ('GND', C_GND, '(already GND)'), ('LV3', None, 'free'), ('LV4', None, 'free')]
+    step = mw / 6
+    for items, yy, up in ((hv, my + mh - 10, True), (lv, my + 10, False)):
+        sg = 1 if up else -1
+        for i, (name, col, dest) in enumerate(items):
+            x = mx + step * (i + 0.5)
+            d.add(Circle(x, yy, 4.2, fillColor=colors.HexColor('#D8B060'), strokeColor=C_TEXT, strokeWidth=0.5))
+            d.add(String(x, yy + (-13 if up else 8), name, fontName='Helvetica-Bold', fontSize=7,
+                         fillColor=colors.white, textAnchor='middle'))
+            if col is None:
+                continue
+            if name == 'LV':
+                col = colors.HexColor('#2E8B57')
+            # elbow heights chosen so that no two wires cross
+            hy = yy + sg * (18 if i in (0, 3) else 30)
+            lx = mx + mw / 2 + (i - 1.5) * 104
+            ly = yy + sg * 44
+            for (xa, ya, xb, yb) in ((x, yy, x, hy), (x, hy, lx, hy), (lx, hy, lx, ly)):
+                d.add(Line(xa, ya, xb, yb, strokeColor=col, strokeWidth=1.4))
+            tw = len(dest) * 3.7 + 6
+            by = ly if up else ly - 10
+            d.add(Rect(lx - tw / 2, by, tw, 10, fillColor=colors.white, strokeColor=col, strokeWidth=0.6))
+            d.add(String(lx, by + 3, dest, fontName='Helvetica-Bold', fontSize=7, fillColor=col, textAnchor='middle'))
+    d.add(String(mx - 8, my + mh - 13, 'HV = 5 V side', fontName='Helvetica', fontSize=7, fillColor=C_TEXT,
+                 textAnchor='end'))
+    d.add(String(mx - 8, my + 7, 'LV = 3.3 V side', fontName='Helvetica', fontSize=7, fillColor=C_TEXT,
+                 textAnchor='end'))
+    return d
 
 
 def fig_top_buzzer():
     v = View(100.2, 108.0, 122.0, 125.07, 110 * mm, bottom=False)
     labels = [('BZ1', 1, C_CUT, 'BZ1: remove the buzzer', 30, 26),
-              ('J8', 1, C_GND, 'J8.1 3.3V', -14, -30),
-              ('J8', 2, C_DS0, 'J8.2 GPIO17', 10, -44),
-              ('J8', 3, C_GND, 'J8.3 GND', 34, -26)]
+              ('J8', 1, C_GND, 'J8.1 3.3V -> LV', -14, -30),
+              ('J8', 2, C_DS0, 'J8.2 GPIO17 -> LV1', 10, -44),
+              ('J8', 3, C_GND, 'J8.3 GND -> GND', 34, -26)]
     return board_drawing(v, 'F.Cu', labels, None, title='TOP side at BZ1/J8 (drawn from the KiCad file)',
                          parts=('J8', 'BZ1'))

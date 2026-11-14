@@ -15,16 +15,24 @@ playback and its interrupt-latency problems (Bounty Bob checksum errors, the 233
 The mod is the one in `doc/density-select-mod.pdf` (generator: `tools/density_pdf/`). Nothing else is
 needed for the test version.
 
-| Signal | From | To | Parts |
-|---|---|---|---|
-| DS0 (VIA PB5) | IC1 pin 15 | GPIO17 = J8 pin 2 (buzzer removed) | 10k in series, 22k to GND (J8 pin 3) |
-| DS1 (VIA PB6) | IC1 pin 16 | GPIO3 = Pico pin 5 | 10k in series, 22k to GND (Pico pin 3) |
-| SOE_GA | cut trace Pico pin 5 -> R19 | R19 pad 2 wired to GND | keeps the 1541-II gate array as before |
+A 4-channel BSS138 level shifter module (HV1-4/LV1-4, HV, LV, GND, 10k pull-ups on both sides)
+converts the two lines; two channels are used. It sits on the top side where the buzzer was.
 
-Use 47k instead of 22k if the VIA high level is below 3.5 V (see the PDF).
+| Module pin | Wire to |
+|---|---|
+| HV1 / HV2 | VIA socket pin 15 (DS0) / pin 16 (DS1), bottom side |
+| HV | VIA socket pin 20 (+5 V) |
+| LV | J8 pin 1 (3.3 V) |
+| LV1 | J8 pin 2 = GPIO17 (buzzer removed) |
+| LV2 | Pico pin 5 = GPIO3 (SOE_GA trace cut) |
+| GND | J8 pin 3 |
 
-Checks after the mod: see the PDF, section "Checks". The old firmware must still load normal disks
-(the board pins now only sit behind 10k, SOE_GA is still low).
+SOE_GA: cut the trace Pico pin 5 -> R19 and wire R19 pad 2 to GND (keeps the 1541-II gate array as before).
+
+**Flash the mod firmware first.** The old firmware drives GPIO3 and GPIO17 as outputs; through the
+bidirectional shifter that pulls DS0/DS1 low and the drive reads at the wrong density.
+
+Checks after the mod: see the PDF, step 5.
 
 Optional for debugging: a logic analyser on BRDY (GPIO22), SYNC (GPIO2), PA0 (GPIO8), DS0, DS1, SOE (GPIO0).
 
