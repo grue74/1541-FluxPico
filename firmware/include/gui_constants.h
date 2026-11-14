@@ -23,9 +23,16 @@ enum GUI_MODE{GUI_INFO_MODE, GUI_MENU_MODE, GUI_FILE_BROWSER, GUI_SELECTOR};
 #define disp_tracktxt_s       "T:"
 #define disp_trackno_p        2,0
 
-#define disp_motortxt_p       5,0
-#define disp_motor_on_s       "Motor"
-#define disp_motor_off_s      "     "
+// first line while the drive works: "T:18+S:07W WProt"
+#define disp_halftrack_p      4,0       // '+' = head on a half-track (18.5)
+#define disp_sectortxt_p      5,0       // sector under the head, motor on
+#define disp_sectortxt_s      "S:"
+#define disp_sector_none_s    "     "
+#define disp_writemark_c      'W'       // the shown sector is being written
+
+#define DRIVE_STATUS_REFRESH_US (150000)  // not a divisor of 200ms (one revolution)
+#define DRIVE_HEADER_SHOW_MS    (100)     // a header older than this: "S:--"
+#define DRIVE_WRITE_SHOW_MS     (500)     // a written sector stays this long
 
 #define disp_writeprottxt_p   11,0
 #define disp_writeprot_on_s   "WProt"

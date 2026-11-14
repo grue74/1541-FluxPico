@@ -45,6 +45,7 @@ void show_sdcard_info_message(void);
 void init_stepper(void);
 void stepper_inc(void);
 void stepper_dec(void);
+void set_head_near_track(const uint8_t track);
 void init_motor(void);
 void init_control_signals(void);
 void init_soe_gatearray(void);
@@ -60,7 +61,10 @@ void send_disk_change(void);
 
 void init_sound(void);
 
-bool repeating_timer_callback(__unused struct repeating_timer *t);
+int64_t disk_alarm_callback(alarm_id_t id, void *user_data);
+void service_track_resolver(void);
+uint32_t mark_track_dirty(void);
+void drive_debug_service(void);
 void init_bytetimer(void);
 void start_bytetimer(uint8_t half_track);
 void stop_bytetimer(void);
@@ -95,8 +99,10 @@ void start_stepper_timer(void);
 #define enable_write_protection()   {clear_wps();floppy_wp=true;}
 #define disable_write_protection()  {set_wps();floppy_wp=false;}
 
+extern volatile bool beeper_enabled;   // settings menu: stepper sound on/off
+
 #if PCB_VERSION>=17
-#define turn_sound_on()     gpio_put(GPIO_SND,true)
+#define turn_sound_on()     gpio_put(GPIO_SND,beeper_enabled)
 #define turn_sound_off()    gpio_put(GPIO_SND,false)
 #else
 #define turn_sound_on()     {}
@@ -122,10 +128,6 @@ extern uint8_t num_max_tracks;
 extern uint8_t selected_track;     // this holds the selected tracknumber
 extern volatile uint8_t akt_half_track;     // this will be the one to be transfered
 extern uint8_t old_half_track;
-
-// timer definition
-
-extern struct repeating_timer bytetimer;
 
 
 extern char image_filename[256]; //Maximal 256 Zeichen
@@ -160,7 +162,9 @@ extern bool is_image_mount;
 extern bool floppy_wp;  // Hier wird der aktuelle WriteProtection Zustand gespeichert
                         // false=Nicht Schreibgeschützt , true=Schreibgeschützt
 
-#define STEP_MIN_TIME (2000)    // us between 2 step changes.
+#define STEP_SETTLE_TIME (20)  // us without edges on STP0/STP1 before the stepper phase is read
+void init_stepper_phase(void);   // start value of the stepper phase
+uint8_t current_stepper_phase(void);   // phase the drive outputs now (last stable value)
 
 extern uint8_t stepper_signal_puffer[256]; // Ringpuffer für Stepper Signale (256 Bytes)
 extern volatile uint8_t stepper_signal_r_pos;

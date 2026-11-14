@@ -13,6 +13,8 @@
 #include "hardware/timer.h"
 #include "hardware/clocks.h"
 #include <pico/multicore.h>
+#include "hardware/irq.h"
+#include "hardware/timer.h"
 
 
 #include "pinout.h"
@@ -39,6 +41,7 @@
 #include "main.h"
 #include "drive.h"
 #include "files.h"
+#include "settings.h"
 #include "gui.h"
 
 #define START_MESSAGE_TIME 1500
@@ -62,7 +65,11 @@ MENU_ENTRY image_menu_entrys[] = {  {"..",              M_BACK_IMAGE, ENTRY_TO_P
                                     {"New Image      ", M_NEW_IMAGE}};
 
 MENU_ENTRY settings_menu_entrys[]={ {"..",              M_BACK_SETTINGS, ENTRY_TO_PARENT},
-                                    {"Restart        ", M_RESTART}};
+                                    {"Restart        ", M_RESTART},
+#if PCB_VERSION>=17
+                                    {"Beeper     ",     M_BEEPER, ENTRY_ONOFF, 1},  // stepper sound
+#endif
+                                    };
 
 MENU_ENTRY info_menu_entrys[] = {   {"..",              M_BACK_INFO, ENTRY_TO_PARENT},
                                     {"Version        ", M_VERSION_INFO},
@@ -86,7 +93,6 @@ volatile uint16_t akt_track_pos = 0;
 uint8_t selected_track;     // this holds the selected tracknumber
 volatile uint8_t akt_half_track;     // this will be the one to be transfered
 uint8_t old_half_track;
-struct repeating_timer bytetimer;
 char image_filename[256]; //Maximal 256 Zeichen
 char current_path[512];
 uint8_t current_gui_mode;
@@ -104,6 +110,7 @@ uint8_t fb_line_scroll_end_begin_wait = 10;
 uint8_t akt_image_type = UNDEF_IMAGE;     // 0=kein Image, 1=G64, 2=D64, 3=Selector
 bool is_image_mount = false;
 bool floppy_wp = true;  // Hier wird der aktuelle WriteProtection Zustand gespeichert
+volatile bool beeper_enabled = true;    // stepper sound on the buzzer (settings menu)
 uint8_t stepper_signal_puffer[256]; // Ringpuffer für Stepper Signale (256 Bytes)
 volatile uint8_t stepper_signal_r_pos = 0;
 volatile uint8_t stepper_signal_w_pos = 0;
@@ -124,18 +131,70 @@ int64_t input_debounce_callback(alarm_id_t id, void *user_data)
     return 0;
 }
 
+// stepper phase as stored in stepper_signal_puffer
+static inline uint8_t read_stepper_phase(void)
+{
+    return (uint8_t) ((bool_to_bit(gpio_get(GPIO_STP0))<<1) | (bool_to_bit(gpio_get(GPIO_STP1))));
+}
+
+static alarm_id_t stepper_settle_alarm = 0;     // pending settle sample, 0 = none
+static uint8_t    stepper_last_phase   = 0;     // last phase put into the ring buffer
+
+// put the current phase into the ring buffer if it changed
+static void sample_stepper_phase(void)
+{
+    const uint8_t phase = read_stepper_phase();
+    if (phase != stepper_last_phase)
+    {
+        stepper_last_phase = phase;
+        stepper_signal_puffer[stepper_signal_w_pos] = phase;
+        stepper_signal_w_pos++;
+    }
+}
+
+// the stepper lines have been quiet for STEP_SETTLE_TIME: read the phase
+static int64_t stepper_settle_callback(alarm_id_t id, void *user_data)
+{
+    (void) id;
+    (void) user_data;
+
+    stepper_settle_alarm = 0;
+    sample_stepper_phase();
+    return 0;
+}
+
+// start value of the stepper phase (called once at start, before the interrupts)
+void init_stepper_phase(void)
+{
+    stepper_last_phase = read_stepper_phase();
+    stepper_signal_puffer[(uint8_t) (stepper_signal_w_pos - 1)] = stepper_last_phase;
+    set_head_near_track(INIT_TRACK);    // the head position must belong to this phase
+}
+
+// phase the drive outputs now (last stable value)
+uint8_t current_stepper_phase(void)
+{
+    return stepper_last_phase;
+}
+
 void gpio_callback(uint gpio, uint32_t events)
 {
     if ((GPIO_STP0==gpio) || (GPIO_STP1==gpio))
     {
-        static uint64_t last_int;
-        // general gpio-ISR .. triggered for STP0 or STP1 change.. no need to detect the cause
-        if ((time_us_64()-last_int) > STEP_MIN_TIME)
+        // STP0 or STP1 changed. A step can change both lines at once, and
+        // through the level shifters a rising edge is slower than a falling
+        // one - reading right away can catch a mix of old and new phase.
+        // So the phase is read STEP_SETTLE_TIME after the last edge.
+        if (stepper_settle_alarm > 0)
         {
-            stepper_signal_puffer[stepper_signal_w_pos] = ((bool_to_bit(gpio_get(GPIO_STP0))<<1) | (bool_to_bit(gpio_get(GPIO_STP1))));
-            stepper_signal_w_pos++;
+            (void) cancel_alarm(stepper_settle_alarm);
         }
-        last_int = time_us_64();
+        stepper_settle_alarm = add_alarm_in_us(STEP_SETTLE_TIME, stepper_settle_callback, NULL, true);
+        if (stepper_settle_alarm <= 0)
+        {
+            stepper_settle_alarm = 0;
+            sample_stepper_phase();     // no alarm available: read it now
+        }
     } else {
         if ((NO_KEY == irq_key_value) && (false == input_block))
         {
@@ -212,6 +271,7 @@ int main()
 
     // Stepper Initialisieren
     init_stepper();
+    init_stepper_phase();       // the first change after this counts as a step
 
     // Motor Initialisieren
     init_motor();
@@ -239,6 +299,12 @@ int main()
     menu_init(&info_menu,     info_menu_entrys,     count_of(info_menu_entrys),     LCD_LINE_SIZE, LCD_LINE_COUNT);
 
     menu_set_root(&main_menu);
+
+    // stored settings (beeper, ...)
+    settings_load();
+#if PCB_VERSION>=17
+    menu_set_entry_var1(&settings_menu, M_BEEPER, beeper_enabled);
+#endif
     // ----
 
     sleep_ms(START_MESSAGE_TIME);
@@ -252,10 +318,16 @@ int main()
     current_path[0]='/';
     current_path[1]=0;
 
+    // the disk emulation runs in the alarm interrupt of core0: it must not
+    // wait for USB, GPIO or other interrupts (late BYTE READY pulses)
+    irq_set_priority(hardware_alarm_get_irq_num(PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM), PICO_HIGHEST_IRQ_PRIORITY);
+
     multicore_launch_core1( start_gui_core );
     while (true) {
         check_stepper_signals();
-        
+        service_track_resolver();   // bit-level framing of the current track
+        settings_service();         // write changed settings to flash
+        drive_debug_service();      // event log on USB serial (DEBUG_DRIVE_LOG builds only)
     }
 }
 /////////////////////////////////////////////////////////////////////

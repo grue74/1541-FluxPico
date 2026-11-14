@@ -9,6 +9,7 @@
 #include "rw_routines.h"
 #include "globals.h"
 #include "gcr.h"
+#include "dirlist.h"
 #include "ctype.h"
 #include "c64_intro.h"
 #include "boot_selector.h"
@@ -23,6 +24,8 @@
 
 void generate_empty_image(const uint8_t image_id1, const uint8_t image_id2, const uint8_t track_number)
 {
+    clear_halftracks();     // a generated image has no half-tracks
+
     memset(g64_jumptable,     0, sizeof(g64_jumptable));
     memset(g64_speedtable,    0, sizeof(g64_speedtable));
     memset(d64_sector_puffer, 0, sizeof(d64_sector_puffer));
@@ -68,7 +71,7 @@ void generate_directory_entry(const uint8_t* filename, const uint8_t filetype, c
     uint8_t*    dir_basesector_P = &d64_sector_puffer[1];
     uint8_t*    dir_sector_P = dir_basesector_P;
     uint8_t     next_sector = 1;    // first dir sector (after bam)
-    const uint8_t num_of_sectors = d64_sector_count[d64_track_zone[DIRECTORY_TRACK]];
+    const uint8_t num_of_sectors = d64_sector_count[default_d64_track_zone[DIRECTORY_TRACK]];
 
     dir_sector_P[0] = DIRECTORY_TRACK+1;
     dir_sector_P[1] = next_sector;
@@ -160,12 +163,28 @@ size_t generate_menu_file(DIR* dir_obj, const uint8_t* dir_path, const uint8_t d
         *P++ = 0;
     }
 
+    // entries in the same order as the file browser: sorted if the
+    // directory fits into the sorted list, else in FAT order
+    const bool sorted = dirlist_valid((const char*) dir_path);
+    uint16_t list_pos = 0;
+
     while (P < P_limit)
     {
-        FRESULT fr = f_readdir(dir_obj, &fb_dir_menu_entry);
-        if((0 == fb_dir_menu_entry.fname[0]) || (FR_OK != fr))
+        if (sorted)
         {
-            break;
+            if (list_pos >= dirlist_count())
+            {
+                break;
+            }
+            strcpy(fb_dir_menu_entry.fname, dirlist_name(list_pos));
+            fb_dir_menu_entry.fattrib = dirlist_attrib(list_pos);
+            ++list_pos;
+        } else {
+            FRESULT fr = f_readdir(dir_obj, &fb_dir_menu_entry);
+            if((0 == fb_dir_menu_entry.fname[0]) || (FR_OK != fr))
+            {
+                break;
+            }
         }
 
         if(fb_dir_menu_entry.fattrib & AM_DIR)

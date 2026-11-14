@@ -41,6 +41,9 @@
 
 extern const uint16_t d64_track_offset[NUM_TRACKS_MAX];
 extern const uint8_t d64_sector_count[NUM_SPEEDZONES];
+// zone (3 - density) a track is played at: from the G64 speed table or a
+// density rule. The D64 layout (sectors per track, gaps, interleave) always
+// follows the track number: default_d64_track_zone.
 extern uint8_t d64_track_zone[NUM_TRACKS_MAX];
 extern const uint8_t default_d64_track_zone[NUM_TRACKS_MAX];
 
@@ -54,11 +57,40 @@ extern uint32_t g64_speedtable[2*G64_TRACKCOUNT];
 #define G64_HEADERSIZE (sizeof(g64_head)+sizeof(g64_jumptable)+sizeof(g64_speedtable)) // should be 684 bytes
 
 extern const uint8_t g64_speedzones[NUM_SPEEDZONES];
+extern const uint16_t g64_nominal_tracksize[NUM_SPEEDZONES];
 
 extern uint16_t g64_tracklen[G64_TRACKCOUNT];
 
 // enough space to store 42 tracks, each 7928 bytes byte length
 extern uint8_t g64_tracks[G64_TRACKCOUNT][G64_TRACKSIZE];
+
+// half-tracks (n.5) of a G64 image are stored in a pool with their real
+// length - only the ones present in the image (copy protections)
+#define G64_HALFTRACK_POOL_SIZE (80*1024)
+extern uint8_t  g64_halftrack_pool[G64_HALFTRACK_POOL_SIZE];
+extern uint32_t g64_halftrack_pool_used;
+extern uint8_t* g64_halftrack[G64_TRACKCOUNT];      // data of track n+1.5 (index n), NULL if none
+extern uint16_t g64_halftracklen[G64_TRACKCOUNT];
+void clear_halftracks(void);
+
+// head position (0 = track 1, 1 = track 1.5, ...) -> key of the stored track
+// the head reads: the half-track if it is stored, else the track below
+static inline uint8_t g64_track_key(const uint8_t half_track)
+{
+    return ((half_track & 1) && (NULL != g64_halftrack[half_track >> 1])) ? half_track : (uint8_t) (half_track & 0xFE);
+}
+
+// raw data and length of a stored track (key from g64_track_key)
+static inline uint8_t* g64_track_data(const uint8_t key, uint16_t* len)
+{
+    if (key & 1)
+    {
+        *len = g64_halftracklen[key >> 1];
+        return g64_halftrack[key >> 1];
+    }
+    *len = g64_tracklen[key >> 1];
+    return g64_tracks[key >> 1];
+}
 
 extern uint8_t id1;    // id1 and id2 identify a floppy-disk
 extern uint8_t id2;    // - these need to change to .. signal a disk-change or after a format...

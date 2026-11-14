@@ -37,15 +37,88 @@ void show_longpress(void)
     }
 }
 
+/////////////////////////////////////////////////////////////////////
+
+// first display line: "T:18+S:07W WProt"
+//  T  track under the head, '+' when it is on a half-track (18.5)
+//  S  sector of the last header that passed the head (motor on),
+//     "--" if there is none (unformatted, protection track)
+//  W  the shown sector is being written
+static void show_drive_status(const bool force)
+{
+    static uint64_t last_update  = 0;
+    static uint8_t  shown_half   = 0xFF;
+    static uint8_t  shown_sector = 0xFE;    // 0xFE: blank (motor off), 0xFF: "--"
+    static char     shown_mark   = '?';
+    char str[8];
+
+    const uint64_t now = time_us_64();
+    if (!force && ((now - last_update) < DRIVE_STATUS_REFRESH_US))
+    {
+        return;
+    }
+    last_update = now;
+
+    const uint8_t half = akt_half_track;
+    if (force || (half != shown_half))
+    {
+        shown_half = half;
+        display_setcursor(disp_tracktxt_p);
+        display_string(disp_tracktxt_s);
+        display_setcursor(disp_trackno_p);
+        (void) dez2out((half >> 1) + 1, 2, str);
+        display_data(str[0]);
+        display_data(str[1]);
+        display_setcursor(disp_halftrack_p);
+        display_data((half & 1) ? '+' : ' ');
+    }
+
+    uint8_t sector = 0xFE;
+    char    mark   = ' ';
+    if (get_motor_status() && is_image_mount)
+    {
+        const uint32_t now_ms = (uint32_t) (now / 1000);
+        sector = 0xFF;
+        if ((0 != disk_write_ms) && ((now_ms - disk_write_ms) < DRIVE_WRITE_SHOW_MS))
+        {
+            sector = disk_write_sector;
+            mark   = disp_writemark_c;
+        } else if ((0 != disk_header_ms) && ((now_ms - disk_header_ms) < DRIVE_HEADER_SHOW_MS)) {
+            sector = disk_header_sector;
+        }
+    }
+
+    if (force || (sector != shown_sector) || (mark != shown_mark))
+    {
+        shown_sector = sector;
+        shown_mark   = mark;
+        display_setcursor(disp_sectortxt_p);
+        if (0xFE == sector)
+        {
+            display_string(disp_sector_none_s);
+        } else {
+            display_string(disp_sectortxt_s);
+            if (sector > 99)
+            {
+                display_data('-');      // no header seen, or a strange one
+                display_data('-');
+            } else {
+                (void) dez2out(sector, 2, str);
+                display_data(str[0]);
+                display_data(str[1]);
+            }
+            display_data(mark);
+        }
+    }
+}
+
+/////////////////////////////////////////////////////////////////////
+
 void update_gui(void)
 {
-    static uint8_t shown_half_track = 255;
-    static bool shown_motor_status = false;
     static bool key2_pressed = false;
     static uint32_t wait_counter0 = 0;
-    bool new_motor_status;
     uint8_t key_code = get_key_from_buffer();
-    char byte_str[8];
     FILINFO next_dir_entry;
 
     switch (current_gui_mode)
@@ -62,8 +135,7 @@ void update_gui(void)
             // next image...
             if (selected_image_nr<fb_dir_entry_count)
             {
-                seek_to_dir_entry(selected_image_nr, current_path);
-                FRESULT fr = f_readdir(&dir_object, &next_dir_entry);
+                FRESULT fr = get_dir_entry(selected_image_nr, current_path, &next_dir_entry);
                 if((0 != next_dir_entry.fname[0]) && (FR_OK == fr))
                 {
                     if(!(next_dir_entry.fattrib & AM_DIR))
@@ -85,25 +157,7 @@ void update_gui(void)
         }
         if (key2_pressed) { show_longpress(); }
 
-        if(shown_half_track != akt_half_track)
-        {
-            shown_half_track = akt_half_track;
-            display_setcursor(disp_trackno_p);
-            (void)dez2out((shown_half_track>>1)+1, 2, byte_str);
-            display_data(byte_str[0]);
-            display_data(byte_str[1]);
-        }
-
-        new_motor_status = get_motor_status();
-        if(shown_motor_status != new_motor_status)
-        {
-            shown_motor_status = new_motor_status;
-            display_setcursor(disp_motortxt_p);
-            if(shown_motor_status)
-                display_string(disp_motor_on_s);
-            else
-                display_string(disp_motor_off_s);
-        }
+        show_drive_status(false);
 
         if((is_image_mount) && (gui_current_line_offset > 0))
         {
@@ -167,25 +221,7 @@ void update_gui(void)
 
         handle_menu_image();
        
-        if(shown_half_track != akt_half_track)
-        {
-            shown_half_track = akt_half_track;
-            display_setcursor(disp_trackno_p);
-            (void)dez2out((shown_half_track>>1)+1, 2, byte_str);
-            display_data(byte_str[0]);
-            display_data(byte_str[1]);
-        }
-
-        new_motor_status = get_motor_status();
-        if(shown_motor_status != new_motor_status)
-        {
-            shown_motor_status = new_motor_status;
-            display_setcursor(disp_motortxt_p);
-            if(shown_motor_status)
-                display_string(disp_motor_on_s);
-            else
-                display_string(disp_motor_off_s);
-        }
+        show_drive_status(false);
         break;
 
     default:
@@ -341,6 +377,16 @@ void check_menu_events(const uint16_t menu_event)
                     break;
 
                 /// Settings Menü
+                case M_BEEPER:
+                    beeper_enabled = (0 != menu_get_entry_var1(&settings_menu, M_BEEPER));
+                    if (!beeper_enabled)
+                    {
+                        turn_sound_off();
+                    }
+                    settings_request_save();    // remembered after power-off
+                    menu_refresh();     // show the new state
+                    break;
+
                 case M_RESTART:
                     // exit_main = 0;
                     menu_refresh();
@@ -424,23 +470,9 @@ void show_start_message(void)
 
 void infomode_update(void)
 {
-    uint8_t byte_str[3];
-
     display_clear();
 
-    display_setcursor(disp_tracktxt_p);
-    display_string(disp_tracktxt_s);
-
-    display_setcursor(disp_trackno_p);
-    (void)dez2out((akt_half_track>>1)+1, 2, byte_str);
-    display_data(byte_str[0]);
-    display_data(byte_str[1]);
-
-    if(get_motor_status())
-    {
-        display_setcursor(disp_motortxt_p);
-        display_string(disp_motor_on_s);
-    }
+    show_drive_status(true);
 
     if(floppy_wp)
     {

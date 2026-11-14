@@ -19,6 +19,7 @@
 #include "gui_constants.h"
 #include "menu_image.h"
 #include "rw_routines.h"
+#include "dirlist.h"
 
 extern void (*display_clear)(void);
 extern void (*display_home)(void);
@@ -56,6 +57,7 @@ void filebrowser_refresh(void);
 
 uint16_t get_dir_entry_count(const char* entrycount_path);
 uint16_t seek_to_dir_entry(uint16_t entry_num, const char* seek_path);
+FRESULT get_dir_entry(uint16_t entry_num, const char* entry_path, FILINFO* entry);
 
 uint8_t open_dir_entry(FILINFO od_file_entry);
 uint8_t open_disk_image(FIL* fd, FILINFO *file_entry);

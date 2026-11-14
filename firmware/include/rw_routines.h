@@ -20,6 +20,7 @@ typedef enum {
 } fill_direction_t;
 
 int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo);
+void apply_density_rules(const char* image_name);   // "<image>.den" density rules for a loaded G64
 int8_t write_disk(FIL* fd, const int image_type, const uint8_t num_tracks);
 
 void convert_d64track2gcr(const uint8_t track_nr, const uint8_t image_id1, const uint8_t image_id2);

@@ -41,6 +41,7 @@ void show_sdcard_info_message(void);
 void init_stepper(void);
 void stepper_inc(void);
 void stepper_dec(void);
+void set_head_near_track(const uint8_t track);   // head to/next to a track, in line with the stepper phase
 void init_motor(void);
 void init_control_signals(void);
 void init_soe_gatearray(void);
@@ -49,6 +50,15 @@ void start_bytetimer(uint8_t half_track);
 void stop_bytetimer(void);
 void init_sound(void);
 
-bool repeating_timer_callback(__unused struct repeating_timer *t);
+int64_t disk_alarm_callback(alarm_id_t id, void *user_data);
+
+// drive activity for the display (written by the disk emulation)
+extern volatile uint8_t  disk_header_sector;    // sector of the last header under the head, 0xFF: none
+extern volatile uint32_t disk_header_ms;        // time of that header in ms
+extern volatile uint8_t  disk_write_sector;     // sector of the last write
+extern volatile uint32_t disk_write_ms;         // time of the last written byte in ms
+void service_track_resolver(void);
+uint32_t mark_track_dirty(void);
+void drive_debug_service(void);   // prints the event log (DEBUG_DRIVE_LOG builds)
 
 #endif

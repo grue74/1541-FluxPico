@@ -17,6 +17,7 @@
 #include "files.h"
 #include "mymenu.h"
 #include "gui_constants.h"
+#include "settings.h"
 
 void show_longpress(void);
 void update_gui(void);

@@ -35,10 +35,29 @@ uint32_t g64_speedtable[2*G64_TRACKCOUNT];
 
 const uint8_t g64_speedzones[NUM_SPEEDZONES] = { 3, 2, 1, 0};
 
+// raw track size of an unformatted track (bytes per revolution at 300rpm)
+const uint16_t g64_nominal_tracksize[NUM_SPEEDZONES] = { 7692, 7142, 6666, 6250 };
+
 uint16_t g64_tracklen[G64_TRACKCOUNT];
 
 // enough space to store 42 tracks, each 7928 bytes byte length
 uint8_t g64_tracks[G64_TRACKCOUNT][G64_TRACKSIZE];
+
+// half-tracks present in a G64 image
+uint8_t  g64_halftrack_pool[G64_HALFTRACK_POOL_SIZE];
+uint32_t g64_halftrack_pool_used = 0;
+uint8_t* g64_halftrack[G64_TRACKCOUNT];
+uint16_t g64_halftracklen[G64_TRACKCOUNT];
+
+void clear_halftracks(void)
+{
+    for (uint8_t i = 0; i < G64_TRACKCOUNT; ++i)
+    {
+        g64_halftrack[i]    = NULL;
+        g64_halftracklen[i] = 0;
+    }
+    g64_halftrack_pool_used = 0;
+}
 
 uint8_t id1 = 0;    // id1 and id2 identify a floppy-disk
 uint8_t id2 = 0;    // - these need to change to .. signal a disk-change or after a format...

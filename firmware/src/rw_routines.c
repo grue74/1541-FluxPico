@@ -5,10 +5,127 @@
  * Last change: 2026/06/21
  ***********************************/
 
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "rw_routines.h"
 #include "menu_image.h"
 #include "globals.h"
 #include "gcr.h"
+#include "gcr_resolve.h"
+
+/////////////////////////////////////////////////////////////////////
+// density rules ("<image>.den" next to a G64 image)
+//
+// The board cannot see the density select lines (VIA2 PB5/PB6). Some
+// protection loaders read tracks with a density that does not match the
+// rate the track was recorded at - the drive then sees other bytes
+// (RapidLok: the key track 36 is read at density 3). For such images a
+// text file with the same name and the extension .den lists the tracks
+// and the density the loader uses, one rule per line:
+//
+//     # Law of the West (RapidLok 1)
+//     32-36 3
+//
+// "first[-last] density" (tracks 1..42, density 0..3, 3 = tracks 1-17).
+// These tracks are converted after loading into the bit stream the drive
+// decodes at that density (gcr_resample). Half-tracks are not converted.
+// A saved G64 contains the converted tracks.
+
+#define DENSITY_FILE_MAX    (512)
+
+void apply_density_rules(const char* image_name)
+{
+    // static: this runs on core1 (GUI), whose stack is small
+    static char name[FF_MAX_LFN + 1];
+    static FIL  df;
+    static char text[DENSITY_FILE_MAX + 1];
+    const size_t len = strlen(image_name);
+    if ((0 == len) || ((len + 4) >= sizeof(name)))
+    {
+        return;
+    }
+    // <name>.den: replace the extension (the image name always has one)
+    const char* dot = strrchr(image_name, '.');
+    const size_t base = dot ? (size_t) (dot - image_name) : len;
+    memcpy(name, image_name, base);
+    strcpy(&name[base], ".den");
+
+    if (FR_OK != f_open(&df, name, FA_READ))
+    {
+        return;                         // no rules for this image
+    }
+    UINT got = 0;
+    (void) f_read(&df, text, DENSITY_FILE_MAX, &got);
+    (void) f_close(&df);
+    text[got] = 0;
+
+    // scratch for the converted track: the free part of the half-track pool
+    if ((G64_HALFTRACK_POOL_SIZE - g64_halftrack_pool_used) < G64_TRACKSIZE)
+    {
+        printf("density rules: no room to convert\n");
+        return;
+    }
+    uint8_t* const scratch = &g64_halftrack_pool[g64_halftrack_pool_used];
+
+    const char* p = text;
+    while (*p)
+    {
+        // one line: first[-last] density, '#' starts a comment
+        while ((' ' == *p) || ('\t' == *p) || ('\r' == *p) || ('\n' == *p)) { ++p; }
+        if (('#' == *p) || !isdigit((unsigned char) *p))
+        {
+            while (*p && ('\n' != *p)) { ++p; }
+            continue;
+        }
+        int first = (int) strtol(p, (char**) &p, 10);
+        int last  = first;
+        if ('-' == *p)
+        {
+            ++p;
+            last = (int) strtol(p, (char**) &p, 10);
+        }
+        while ((' ' == *p) || ('\t' == *p)) { ++p; }
+        const int dens = isdigit((unsigned char) *p) ? (int) strtol(p, (char**) &p, 10) : -1;
+        while (*p && ('\n' != *p)) { ++p; }
+
+        if ((first < 1) || (last > NUM_TRACKS_MAX) || (first > last) || (dens < 0) || (dens > 3))
+        {
+            printf("density rules: line ignored\n");
+            continue;
+        }
+        for (int t = first; t <= last; ++t)
+        {
+            const uint8_t tr = (uint8_t) (t - 1);
+            if (0 == g64_tracklen[tr])
+            {
+                continue;
+            }
+            if ((uint32_t) dens == g64_speedtable[tr * 2])
+            {
+                // already recorded at that density (or converted before and
+                // saved with Save Image): converting again would add bits
+                printf("density rules: track %d is already at density %d\n", t, dens);
+                continue;
+            }
+            uint32_t rot;
+            const uint32_t new_len = gcr_resample(g64_tracks[tr], g64_tracklen[tr], scratch, G64_TRACKSIZE, (uint8_t) dens, &rot);
+            if (0 == new_len)
+            {
+                continue;
+            }
+            gcr_rotate_copy(g64_tracks[tr], scratch, new_len, rot);
+            memset(&g64_tracks[tr][new_len], 0x55, G64_TRACKSIZE - new_len);
+            printf("density rules: track %d read at density %d: %u -> %u bytes\n", t, dens, (unsigned) g64_tracklen[tr], (unsigned) new_len);
+            g64_tracklen[tr]       = (uint16_t) new_len;
+            d64_track_zone[tr]     = (uint8_t) (3 - dens);
+            g64_speedtable[tr * 2] = (uint32_t) dens;
+        }
+    }
+}
+
+/////////////////////////////////////////////////////////////////////
 
 int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
 {
@@ -20,6 +137,8 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
 
     id1 = 0xFF;
     id2 = 0xFF;
+
+    clear_halftracks();     // only G64 images can bring half-tracks
 
     switch(image_type)
     {
@@ -40,16 +159,30 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
                 break;
             }
 
+            // number of half-tracks stored in the image (usually 84)
+            const uint32_t num_half_tracks = P[9];
+            UINT table_size = num_half_tracks * sizeof(g64_jumptable[0]);
+            if (table_size > sizeof(g64_jumptable))
+            {
+                table_size = sizeof(g64_jumptable);     // ignore half-tracks > 42.5
+            }
+            memset(g64_jumptable,  0, sizeof(g64_jumptable));
+            memset(g64_speedtable, 0, sizeof(g64_speedtable));
+
             // read the jumptable for track-offsets and track count
-            fr = f_read(fd, g64_jumptable, sizeof(g64_jumptable), &bytes_read);
-            if((FR_OK != fr) || (sizeof(g64_jumptable) != bytes_read))
+            fr = f_read(fd, g64_jumptable, table_size, &bytes_read);
+            if((FR_OK != fr) || (table_size != bytes_read))
             {
                 last_track = -3;
                 break;
             }
-            // read the speedtable for track-speeds
-            fr = f_read(fd, g64_speedtable, sizeof(g64_speedtable), &bytes_read);
-            if((FR_OK != fr) || (sizeof(g64_speedtable) != bytes_read))
+            // read the speedtable for track-speeds (it follows the complete jumptable)
+            fr = f_lseek(fd, sizeof(g64_head) + num_half_tracks * sizeof(g64_jumptable[0]));
+            if (FR_OK == fr)
+            {
+                fr = f_read(fd, g64_speedtable, table_size, &bytes_read);
+            }
+            if((FR_OK != fr) || (table_size != bytes_read))
             {
                 last_track = -4;
                 break;
@@ -63,19 +196,21 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
                     // speed set for complete track (values 0..3)
                     d64_track_zone[track_nr] = (uint8_t) 3 - (uint8_t) (speed_set & 0x0F);
                 } else {
-                    // speed zone defined (see G64.TXT)
-                    // offset of speedzone-area specified here
-                    // @TODO : implement byte-wise speed-setting
-
-                    // temporary fix: use a commom value for this track
-                    d64_track_zone[track_nr] = 3;
+                    // speed zone map defined (see G64.TXT)
+                    // the bit-level emulation derives the bitcell timing from
+                    // the track length (like VICE) - the speed map is only
+                    // used as default zone when the motor is off.
+                    d64_track_zone[track_nr] = default_d64_track_zone[track_nr];
                 }
 
                 offset = g64_jumptable[track_nr<<1];
                 if (0 == offset)
                 {
-                    // we clean existing data in case there is no trackdata stored.
-                    memset(g64_tracks[track_nr], 0x00, G64_TRACKSIZE);
+                    // no trackdata stored: unformatted track like VICE does it
+                    // (0x55 = flux reversals but no sync)
+                    d64_track_zone[track_nr] = default_d64_track_zone[track_nr];
+                    g64_tracklen[track_nr] = g64_nominal_tracksize[d64_track_zone[track_nr]];
+                    memset(g64_tracks[track_nr], 0x55, G64_TRACKSIZE);
                     continue;
                 }
                 // found some track-offset .. now read the track itself
@@ -91,6 +226,18 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
                 {
                     last_track = -6;
                     break;
+                }
+                if (0 == g64_tracklen[track_nr])
+                {
+                    // empty track entry: handle like a missing track
+                    g64_tracklen[track_nr] = g64_nominal_tracksize[default_d64_track_zone[track_nr]];
+                    memset(g64_tracks[track_nr], 0x55, G64_TRACKSIZE);
+                    continue;
+                }
+                if (G64_TRACKSIZE < g64_tracklen[track_nr])
+                {
+                    // longer than our buffer: keep the first G64_TRACKSIZE bytes
+                    g64_tracklen[track_nr] = G64_TRACKSIZE;
                 }
 
                 // read track data itself
@@ -138,6 +285,54 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
                     id1 = d64_sector_puffer[1];
                 }
             }
+
+            // half-tracks (1.5, 2.5, ...) into the pool, as long as it has room.
+            // a half-track that does not fit is read as the track below.
+            if (0 <= last_track)
+            {
+                for (uint8_t half_nr = 0; half_nr < G64_TRACKCOUNT; ++half_nr)
+                {
+                    uint16_t half_len;
+
+                    offset = g64_jumptable[(half_nr<<1) + 1];
+                    if (0 == offset)
+                    {
+                        continue;
+                    }
+                    if (FR_OK != f_lseek(fd, offset))
+                    {
+                        break;
+                    }
+                    fr = f_read(fd, &half_len, sizeof(half_len), &bytes_read);
+                    if ((FR_OK != fr) || (sizeof(half_len) != bytes_read))
+                    {
+                        break;
+                    }
+                    if (G64_TRACKSIZE < half_len)
+                    {
+                        half_len = G64_TRACKSIZE;
+                    }
+                    if ((0 == half_len) || ((g64_halftrack_pool_used + half_len) > G64_HALFTRACK_POOL_SIZE))
+                    {
+                        continue;
+                    }
+                    uint8_t* const half_data = &g64_halftrack_pool[g64_halftrack_pool_used];
+                    fr = f_read(fd, half_data, half_len, &bytes_read);
+                    if ((FR_OK != fr) || (half_len != bytes_read))
+                    {
+                        break;
+                    }
+                    g64_halftrack[half_nr]    = half_data;
+                    g64_halftracklen[half_nr] = half_len;
+                    g64_halftrack_pool_used  += half_len;
+                }
+            }
+
+            // protection loaders reading tracks at another density
+            if (0 <= last_track)
+            {
+                apply_density_rules(fileinfo.fname);
+            }
         }
         break;
 
@@ -165,7 +360,7 @@ int8_t read_disk(FIL* fd, const int image_type, FILINFO fileinfo)
             for(uint8_t track_nr=0; track_nr<G64_TRACKCOUNT; ++track_nr)
             {
                 offset = ((uint32_t) d64_track_offset[track_nr]) << 8;   // we store only 16bit values;
-                uint8_t num_of_sectors = d64_sector_count[d64_track_zone[track_nr]];
+                uint8_t num_of_sectors = d64_sector_count[default_d64_track_zone[track_nr]];
 
                 if (FR_OK != f_lseek(fd, offset))
                 {
@@ -251,6 +446,30 @@ int8_t write_disk(FIL* fd, const int image_type, const uint8_t num_tracks)
         ///////////////////////////////////////////////////////////////////////////
         case G64_IMAGE:	// G64
         {
+            // fresh layout: header, tables, then every stored (half-)track
+            // as length + G64_TRACKSIZE bytes. Half-tracks are included.
+            static uint32_t jumptable[2*G64_TRACKCOUNT];
+            static uint32_t speedtable[2*G64_TRACKCOUNT];
+            uint32_t offset = G64_HEADERSIZE;
+
+            for (uint8_t half_nr = 0; half_nr < (2*G64_TRACKCOUNT); ++half_nr)
+            {
+                const uint8_t track_nr = half_nr >> 1;
+                const bool present = (half_nr & 1) ? (NULL != g64_halftrack[track_nr]) : (track_nr < num_tracks);
+                uint32_t speed = g64_speedtable[half_nr];
+                if (3 < speed)
+                {
+                    // speed zone maps are not kept - use the zone of the track
+                    speed = (uint32_t) (3 - ((half_nr & 1) ? default_d64_track_zone[track_nr] : d64_track_zone[track_nr]));
+                }
+                jumptable[half_nr]  = present ? offset : 0;
+                speedtable[half_nr] = speed;
+                if (present)
+                {
+                    offset += sizeof(uint16_t) + G64_TRACKSIZE;
+                }
+            }
+
             // GCR-1541 header
             fr = f_write(fd, g64_head, sizeof(g64_head),&bytes_write);
             if ((FR_OK != fr) || (sizeof(g64_head) != bytes_write))
@@ -260,47 +479,64 @@ int8_t write_disk(FIL* fd, const int image_type, const uint8_t num_tracks)
             }
 
             // jumptable
-            fr = f_write(fd, g64_jumptable, sizeof(g64_jumptable),&bytes_write);
-            if ((FR_OK != fr) || (sizeof(g64_jumptable) != bytes_write))
+            fr = f_write(fd, jumptable, sizeof(jumptable),&bytes_write);
+            if ((FR_OK != fr) || (sizeof(jumptable) != bytes_write))
             {
                 last_track = -fr-40;
                 break;
             }
 
             // speedtable
-            fr = f_write(fd, g64_speedtable, sizeof(g64_speedtable),&bytes_write);
-            if ((FR_OK != fr) || (sizeof(g64_speedtable) != bytes_write))
+            fr = f_write(fd, speedtable, sizeof(speedtable),&bytes_write);
+            if ((FR_OK != fr) || (sizeof(speedtable) != bytes_write))
             {
                 last_track = -fr-60;
                 break;
             }
 
             // raw-tracks
-            for (int track_nr=0; track_nr<num_tracks; track_nr++)
+            memset(d64_sector_puffer, 0, sizeof(d64_sector_puffer));    // padding for half-tracks
+            for (uint8_t half_nr = 0; half_nr < (2*G64_TRACKCOUNT); ++half_nr)
             {
-                fr = f_write(fd, &g64_tracklen[track_nr], sizeof(g64_tracklen[0]),&bytes_write);
-                if ((FR_OK != fr) || (sizeof(g64_tracklen[0]) != bytes_write))
+                if (0 == jumptable[half_nr])
+                {
+                    continue;
+                }
+                uint16_t len;
+                const uint8_t* data = g64_track_data(half_nr, &len);
+
+                fr = f_write(fd, &len, sizeof(len),&bytes_write);
+                if ((FR_OK != fr) || (sizeof(len) != bytes_write))
                 {
                     last_track = -fr-80;
                     break;
                 }
 
-                UINT track_write_len = G64_TRACKSIZE;
-                if (num_tracks > (track_nr+1))
+                // whole tracks are padded in memory, half-tracks are padded with 0
+                const UINT data_len = (half_nr & 1) ? len : G64_TRACKSIZE;
+                fr = f_write(fd, data, data_len,&bytes_write);
+                if ((FR_OK != fr) || (data_len != bytes_write))
                 {
-                    if (0 != g64_jumptable[(track_nr+1)*2])
+                    last_track = -fr-80;
+                    break;
+                }
+                UINT pad = G64_TRACKSIZE - data_len;
+                while (pad > 0)
+                {
+                    const UINT chunk = (pad > sizeof(d64_sector_puffer)) ? sizeof(d64_sector_puffer) : pad;
+                    fr = f_write(fd, d64_sector_puffer, chunk,&bytes_write);
+                    if ((FR_OK != fr) || (chunk != bytes_write))
                     {
-                        track_write_len = g64_jumptable[(track_nr+1)*2]-g64_jumptable[track_nr*2]-sizeof(g64_tracklen[track_nr]);
+                        break;
                     }
+                    pad -= chunk;
                 }
-
-                fr = f_write(fd, &g64_tracks[track_nr], track_write_len,&bytes_write);
-                if ((FR_OK != fr) || (track_write_len != bytes_write))
+                if (0 != pad)
                 {
                     last_track = -fr-80;
                     break;
                 }
-                last_track = track_nr;
+                last_track = (int8_t) (half_nr >> 1);
             }
             break;
         }
@@ -312,7 +548,7 @@ int8_t write_disk(FIL* fd, const int image_type, const uint8_t num_tracks)
             for (int track_nr=0; track_nr<num_tracks; track_nr++)
             {
                 uint8_t* P = g64_tracks[track_nr];
-                uint8_t sector_nr = d64_sector_count[d64_track_zone[track_nr]];
+                uint8_t sector_nr = d64_sector_count[default_d64_track_zone[track_nr]];
                 uint8_t* P_end = &g64_tracks[track_nr][g64_tracklen[track_nr]];
 
                 int32_t offset_track = ((int32_t) d64_track_offset[track_nr]) << 8;   // we store only 16bit values;
@@ -457,9 +693,9 @@ void convert_d64track2gcr(const uint8_t track_nr, const uint8_t image_id1, const
     uint8_t header_bytes[5];
     uint8_t* current_sector;
 
-    const uint8_t num_of_sectors = d64_sector_count[d64_track_zone[track_nr]];
+    const uint8_t num_of_sectors = d64_sector_count[default_d64_track_zone[track_nr]];
     const uint8_t chksum_trackid = (track_nr+1) ^ image_id2 ^ image_id1;
-    const uint8_t gap_size = d64_sector_gap[d64_track_zone[track_nr]];
+    const uint8_t gap_size = d64_sector_gap[default_d64_track_zone[track_nr]];
 
     buffer[0] = image_id2;
     buffer[1] = image_id1;
@@ -544,7 +780,7 @@ void convert_gcr2d64track(uint8_t track_nr)
     uint8_t* P = g64_tracks[track_nr];
     uint8_t* P_end = &g64_tracks[track_nr][g64_tracklen[track_nr]];
     uint8_t* Out_P;
-    uint8_t sector_nr = d64_sector_count[d64_track_zone[track_nr]];
+    uint8_t sector_nr = d64_sector_count[default_d64_track_zone[track_nr]];
     int32_t offset = 0;
 
     uint8_t convert_puffer[5];
@@ -665,8 +901,8 @@ size_t buffer_to_track(uint8_t* buffer, const size_t buffer_len, const uint8_t t
     uint8_t*    Dest_P;
     uint8_t*    Buffer_P = buffer;
     uint8_t     current_sector;
-    const uint8_t sector_interleave = (d64_track_zone[track_nr] == 2) ? 11 : 10; // set interleave to 10 by default, 11 for 18sector-tracks
-    const uint8_t num_of_sectors = d64_sector_count[d64_track_zone[track_nr]];
+    const uint8_t sector_interleave = (default_d64_track_zone[track_nr] == 2) ? 11 : 10; // set interleave to 10 by default, 11 for 18sector-tracks
+    const uint8_t num_of_sectors = d64_sector_count[default_d64_track_zone[track_nr]];
 
     memset(d64_sector_puffer, 0, sizeof(d64_sector_puffer));
 

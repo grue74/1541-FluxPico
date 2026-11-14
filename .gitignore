@@ -13,3 +13,20 @@ firmware/SoftwareC64/labels.lab
 analysis-reports/*
 build-analysis/*
 build/
+test_disks/
+# local build / IDE files
+*.vcxproj
+*.vcxproj.filters
+*.slnx
+*.dir/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+_deps/
+generated/
+pioasm/
+pioasm-install/
+firmware/pico-sdk/
+picotool.exe
+putty.log
+hardware/.history/

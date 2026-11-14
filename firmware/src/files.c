@@ -26,6 +26,7 @@ FRESULT umount_sdcard(void)
     // reset path for next sd-card mount
     current_path[0]='/';
     current_path[1]=0;
+    dirlist_clear();
     return f_unmount("");
 }
 
@@ -98,8 +99,7 @@ void handle_menu_image(void)
                         hmi_dir_entry.fattrib = AM_DIR;
                         fr = FR_OK;
                     } else {
-                        seek_to_dir_entry(selected_image_nr-1, current_path);
-                        fr = f_readdir(&dir_object, &hmi_dir_entry);
+                        fr = get_dir_entry(selected_image_nr-1, current_path, &hmi_dir_entry);
                     }
 
                     if((0 != hmi_dir_entry.fname[0]) && (FR_OK == fr))
@@ -149,8 +149,7 @@ void insert_menu_image(char* menu_path, const uint8_t max_blocks)
             create_menu_image(menu_path, &dir_object, &id1, &id2, &num_max_tracks, image_filename, max_blocks);
 
             akt_track_pos = 0;
-            selected_track = (INIT_TRACK << 1);
-            akt_half_track = selected_track;
+            set_head_near_track(INIT_TRACK);    // track 18, in line with the stepper phase
 
             send_byte_ready = true;             // enable VIA transfer
             is_image_mount = true;
@@ -191,8 +190,7 @@ void insert_txt_image(char* menu_path, FILINFO* entry_info, const uint8_t max_bl
     close_disk_image(&fd);
 
     akt_track_pos = 0;
-    selected_track = (INIT_TRACK << 1);
-    akt_half_track = selected_track;
+    set_head_near_track(INIT_TRACK);    // track 18, in line with the stepper phase
 
     send_byte_ready = true;             // enable VIA transfer
     is_image_mount = true;
@@ -372,6 +370,16 @@ uint8_t open_dir_entry(FILINFO od_file_entry)
         return TYPE_DIR;
     }
 
+    // the sorted list only holds names: get size and attributes (write protection)
+    {
+        FILINFO stat_entry;
+        if ((FR_OK == f_chdir(current_path)) && (FR_OK == f_stat(od_file_entry.fname, &stat_entry)))
+        {
+            od_file_entry.fsize   = stat_entry.fsize;
+            od_file_entry.fattrib = stat_entry.fattrib;
+        }
+    }
+
     akt_image_type = open_disk_image(&fd, &od_file_entry);
 
     if(UNDEF_IMAGE == akt_image_type)
@@ -435,25 +443,40 @@ void filebrowser_refresh(void)
 {
     display_clear();
 
-    seek_to_dir_entry(fb_window_pos, current_path);
-
     uint8_t i=0;
 
-    if ((1 < strlen(current_path)) && (0 == fb_window_pos))
+    if (dirlist_valid(current_path))
     {
-        strcpy(fb_dir_entry[0].fname, "..");
-        fb_dir_entry[0].fattrib = AM_DIR;
-        ++i;
-    }
-
-    while((i<LCD_LINE_COUNT) && ((fb_window_pos + i) < fb_dir_entry_count))
-    {
-        FRESULT fr = f_readdir(&dir_object, &(fb_dir_entry[i]));
-        if((0 == fb_dir_entry[i].fname[0]) || (FR_OK != fr))
+        // sorted listing
+        while((i<LCD_LINE_COUNT) && ((fb_window_pos + i) < fb_dir_entry_count))
         {
-            break;
+            FRESULT fr = get_dir_entry(fb_window_pos + i, current_path, &(fb_dir_entry[i]));
+            if((0 == fb_dir_entry[i].fname[0]) || (FR_OK != fr))
+            {
+                break;
+            }
+            ++i;
         }
-        ++i;
+    } else {
+        // directory too big for sorting: FAT order
+        seek_to_dir_entry(fb_window_pos, current_path);
+
+        if ((1 < strlen(current_path)) && (0 == fb_window_pos))
+        {
+            strcpy(fb_dir_entry[0].fname, "..");
+            fb_dir_entry[0].fattrib = AM_DIR;
+            ++i;
+        }
+
+        while((i<LCD_LINE_COUNT) && ((fb_window_pos + i) < fb_dir_entry_count))
+        {
+            FRESULT fr = f_readdir(&dir_object, &(fb_dir_entry[i]));
+            if((0 == fb_dir_entry[i].fname[0]) || (FR_OK != fr))
+            {
+                break;
+            }
+            ++i;
+        }
     }
 
     for (uint8_t j=0; j<i; j++)
@@ -514,18 +537,47 @@ uint16_t get_dir_entry_count(const char* entrycount_path)
     dir_object.pat = pattern;           /* Save pointer to pattern string */
     if (FR_OK == f_opendir(&dir_object, entrycount_path))  /* Open the target directory */
     {
-        FILINFO gdec_dir_entry;
-        while(FR_OK == f_readdir(&dir_object, &gdec_dir_entry))
-        {
-            if(0 == gdec_dir_entry.fname[0])
-            {
-                break;
-            }
-            ++entry_count;
-        }
+        // read all entries once and sort them for the browser and the selector
+        entry_count = dirlist_build(&dir_object, entrycount_path);
     }
     if (1 < strlen(entrycount_path)) { ++entry_count; }
     return entry_count;
+}
+
+/////////////////////////////////////////////////////////////////////
+
+// entry entry_num of the listing (in a subfolder entry 0 is ".."), in the
+// sorted order if the directory fits into the sorted list, else FAT order.
+// fname and fattrib are set; size etc. only in FAT order (see open_dir_entry)
+FRESULT get_dir_entry(uint16_t entry_num, const char* entry_path, FILINFO* entry)
+{
+    if (1 < strlen(entry_path))
+    {
+        if (0 == entry_num)
+        {
+            strcpy(entry->fname, "..");
+            entry->fattrib = AM_DIR;
+            return FR_OK;
+        }
+        --entry_num;
+    }
+
+    if (dirlist_valid(entry_path))
+    {
+        if (entry_num < dirlist_count())
+        {
+            strcpy(entry->fname, dirlist_name(entry_num));
+            entry->fattrib = dirlist_attrib(entry_num);
+            entry->fsize   = 0;
+        } else {
+            entry->fname[0] = 0;
+        }
+        return FR_OK;
+    }
+
+    // FAT order: seek_to_dir_entry counts ".." itself
+    seek_to_dir_entry((1 < strlen(entry_path)) ? (entry_num + 1) : entry_num, entry_path);
+    return f_readdir(&dir_object, entry);
 }
 
 /////////////////////////////////////////////////////////////////////
