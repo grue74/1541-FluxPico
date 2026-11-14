@@ -35,16 +35,19 @@ on the drive's main board, and these differ per drive model. The first target is
   always low.
 * PA0-7, SYNC (PB7), BRDY (CA1), DS0/DS1, stepper and motor lines pass straight through the socket.
 
-## Phase 0 - measure first (no changes)
+## Phase 0 - pulse shape, found by the Pico itself
 
-On the unmodified drive with the **original VIA** (or the board with the old firmware), with a real
-disk and a logic analyser or scope:
+There is no working drive mechanism to measure U12's *Read Data* pulses. U12 makes them with its own
+one-shot (pins 36/37 "MMVA", 39k/2k4), so they are pulses of a fixed width per flux reversal;
+polarity and width are unknown. The Pico can find them without instruments, because in flux mode it
+still sees the gate array's outputs: SYNC (GPIO2), BYTE READY (GPIO22) and port A (GPIO8-15, the
+74LVC4245 set to inputs).
 
-1. **U10 pin 33 (CLR)** while loading a directory: pulse polarity (active low or high), width, and
-   level. This sets how the Pico has to pulse.
-2. **U10 pin 40 (B)** while formatting a scratch disk: confirm it toggles per flux reversal (bit
-   cells of 3.25-4 us; gaps of 1, 2 or 3 cells).
-3. U10 pin 19 and pin 41 levels during a read job, to confirm MODE/SOE as on the schematic.
+* calibration mode: motor on, DOS idle (read mode), play a known track (a sync followed by known
+  GCR bytes)
+* sweep polarity (active low/high) and pulse width (0.1-2 us); for each setting check that SYNC
+  comes at the right places and that port A shows the expected bytes
+* keep the widest working range and use its middle; show the result on the display and in the log
 
 ## Phase 1 - modification (PCB v1.7 + 1541-II)
 
@@ -55,21 +58,22 @@ Everything switchable, so the old firmware can still be used during development.
 | 1 | **MODE jumper.** Lift P1 pin 19 from the board's GND (isolate the pad or replace the pin with a wired one) and add a 3-pin jumper: P1.19 to GND (old firmware) or to IC1 pin 19 = MODE (flux mode). | the gate array must see read/write mode to drive PA and take bytes for writing |
 | 2 | **SOE jumper.** Cut the SOE_GA trace between Pico pin 5 and R19 (as in `density-select-mod.pdf`). Jumper: P2.19 (SOE_GA) to Q9/R19 (old firmware) or to IC1 pin 39 = SOE (flux mode). Do not ground R19 pad 2 in flux mode. | the gate array needs the real SOE with no delay; frees GPIO3 |
 | 3 | **Cut U12 pin 33 -> U10 pin 33** on the drive's main board, close to U12. | the hybrid would fight the Pico's pulses |
-| 4 | **Flux out:** Pico GPIO17 (J8.2, buzzer removed) -> level shifter -> **U10 pin 33** | the pulses |
-| 5 | **Write in:** **U10 pin 40** -> level shifter -> Pico GPIO3 (Pico pin 5) | to store what the drive writes |
-| 6 | Level shifter: the 4-channel BSS138 module, HV = 5 V (VIA pin 20), LV = 3.3 V (J8.1), GND (J8.3). If phase 0 shows short active-high pulses, use a 74AHCT1G125 (5 V) for the flux line instead: the BSS138 module drives low edges fast but rises slowly through 10k. | |
-| 7 | Unplug the head cable (or keep no disk in the drive): in write mode the hybrid would write to a real disk. | safety |
+| 4 | **Flux out:** Pico GPIO3 (Pico pin 5, freed by step 2) -> level shifter -> **U10 pin 33** | the pulses |
+| 5 | Level shifter: one channel of the BSS138 module, HV = 5 V (VIA pin 20), LV = 3.3 V (Pico pin 36), GND. If calibration finds short active-high pulses, use a 74AHCT1G125 (5 V) instead: the module drives low edges fast but rises slowly through 10k. | |
+| 6 | Unplug the head cable (or keep no disk in the drive): in write mode the hybrid would write to a real disk. | safety |
+
+The **buzzer stays** (GPIO17). No wire for write data is needed: see phase 3.
 
 **Never run the old firmware in flux mode.** The gate array then drives PA while the Pico's
 74LVC4245 also drives it. The jumpers in old-firmware position restore the old wiring.
 
 ## Phase 2 - firmware: flux output
 
-* build option `FLUX_MODE`: transceiver disabled (GPIO1 OE), BRDY and SYNC never pulled, PA read
-  only (for the sector display), no buzzer, GPIO3 input
+* build option `FLUX_MODE`: 74LVC4245 set to inputs only (never drives PA), BRDY and SYNC never
+  pulled (read only), GPIO3 = flux output
 * tracks as flux: G64 bits -> a reversal at every 1 bit, cell = the track's speed zone
   (4.00/3.75/3.50/3.25 us) or the per-byte speed map; D64 tracks via GCR as now
-* PIO program on GPIO17: pulse (polarity/width from phase 0), wait N PIO cycles, next; fed by DMA
+* PIO program on GPIO3: pulse (polarity/width from phase 0), wait N PIO cycles, next; fed by DMA
   from a buffer of intervals. 150 MHz PIO clock = 6.7 ns resolution, one revolution = 200 ms
 * head step: switch to the new track's buffer at the same angle; motor off: stop pulses
 * weak/no-flux areas: a real drive's amplifier turns them into random reversals; the PIO feed adds
@@ -77,9 +81,11 @@ Everything switchable, so the old firmware can still be used during development.
 
 ## Phase 3 - firmware: write capture
 
-* PIO on GPIO3 timestamps every edge of U10 pin 40 while MODE is write
-* intervals / bit cell (from the current zone, or measured from the 1-cell intervals) -> GCR bits ->
-  into the track buffer at the current angle; saved to G64/D64 as now
+* the drive writes bytes: the VIA puts them on port A and the gate array shifts them out, pulsing
+  BYTE READY for each. The Pico reads port A at every BYTE READY from the gate array, as the current
+  firmware already does with its own pulses
+* the time between BYTE READY pulses gives the density written at (26/28/30/32 us per byte)
+* bits go into the track buffer at the current angle and are saved to G64/D64 as now
 
 ## Phase 4 - tests
 
