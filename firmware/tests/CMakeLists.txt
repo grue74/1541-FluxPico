@@ -29,7 +29,7 @@ add_executable(drive_harness
     ${FW}/src/rw_routines.c
     ${FW}/src/gcr.c)
 target_include_directories(drive_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs ${FW}/include)
-target_compile_definitions(drive_harness PRIVATE PCB_VERSION=17 _CRT_SECURE_NO_WARNINGS)
+target_compile_definitions(drive_harness PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 # sorted directory listing with a fake FatFS directory
 add_executable(dirlist_test dirlist_test.c ${FW}/src/dirlist.c)

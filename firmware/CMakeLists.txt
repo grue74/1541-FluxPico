@@ -86,21 +86,12 @@ target_link_libraries(1541-FluxPico
 
 pico_add_extra_outputs(1541-FluxPico)
 
-#pass PCB_VERSION-value to the compiler
-# set version to 17 as default
-if(NOT DEFINED PCB_VERSION)
-   set(PCB_VERSION 17)
-endif()
-target_compile_definitions(1541-FluxPico PUBLIC PCB_VERSION=${PCB_VERSION})
+# only the rePico PCB v1.7 is supported (buzzer on GPIO17)
 
 # FLUX_MODE: the Pico sends the track as flux pulses into the drive's gate
 # array (needs the board mod in doc/flux-mod-1541-II.pdf). OFF builds the
 # old byte-level playback for an unmodified rePico board.
-if(PCB_VERSION GREATER_EQUAL 17)
-   option(FLUX_MODE "flux stream into the drive's own read circuit" ON)    # the mod exists for PCB v1.7
-else()
-   option(FLUX_MODE "flux stream into the drive's own read circuit" OFF)
-endif()
+option(FLUX_MODE "flux stream into the drive's own read circuit" ON)
 if(FLUX_MODE)
    target_compile_definitions(1541-FluxPico PUBLIC FLUX_MODE)
 endif()

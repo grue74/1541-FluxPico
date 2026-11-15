@@ -68,9 +68,7 @@ MENU_ENTRY image_menu_entrys[] = {  {"..",              M_BACK_IMAGE, ENTRY_TO_P
 
 MENU_ENTRY settings_menu_entrys[]={ {"..",              M_BACK_SETTINGS, ENTRY_TO_PARENT},
                                     {"Restart        ", M_RESTART},
-#if PCB_VERSION>=17
                                     {"Beeper     ",     M_BEEPER, ENTRY_ONOFF, 1},  // stepper sound
-#endif
                                     };
 
 MENU_ENTRY info_menu_entrys[] = {   {"..",              M_BACK_INFO, ENTRY_TO_PARENT},
@@ -299,10 +297,8 @@ int main()
     init_writeprot();
     disable_write_protection();
 
-#if PCB_VERSION>=17
     // Enable Sound-Output-Pin
     init_sound();
-#endif
 
     // setup menus
     menu_init(&main_menu,     main_menu_entrys,     count_of(main_menu_entrys),     LCD_LINE_SIZE, LCD_LINE_COUNT);
@@ -314,9 +310,7 @@ int main()
 
     // stored settings (beeper, ...)
     settings_load();
-#if PCB_VERSION>=17
     menu_set_entry_var1(&settings_menu, M_BEEPER, beeper_enabled);
-#endif
     // ----
 
     sleep_ms(START_MESSAGE_TIME);

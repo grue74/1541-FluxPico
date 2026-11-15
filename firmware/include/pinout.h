@@ -51,10 +51,5 @@
 #define NOT_CONNECTED (-1)
 
 
-#if PCB_VERSION>=17
 #define GPIO_SND    17
 #define SPI_CS      NOT_CONNECTED
-#else
-#define GPIO_SND    NOT_CONNECTED
-#define SPI_CS      17
-#endif

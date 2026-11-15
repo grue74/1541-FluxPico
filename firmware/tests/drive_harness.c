@@ -7,7 +7,7 @@
  * called every RESOLVE_LATENCY_US (like the main loop on core0).
  *
  * build (MSVC, from firmware/tests):
- *   cl /O2 /W3 /std:c11 /D_CRT_SECURE_NO_WARNINGS /DPCB_VERSION=17 /Istubs /I..\include
+ *   cl /O2 /W3 /std:c11 /D_CRT_SECURE_NO_WARNINGS /Istubs /I..\include
  *      drive_harness.c ..\src\drive.c ..\src\globals.c ..\src\gcr_resolve.c ..\src\rw_routines.c ..\src\gcr.c
  *
  * scenarios:

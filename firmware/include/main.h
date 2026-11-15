@@ -120,13 +120,8 @@ void start_stepper_timer(void);
 
 extern volatile bool beeper_enabled;   // settings menu: stepper sound on/off
 
-#if PCB_VERSION>=17
 #define turn_sound_on()     gpio_put(GPIO_SND,beeper_enabled)
 #define turn_sound_off()    gpio_put(GPIO_SND,false)
-#else
-#define turn_sound_on()     {}
-#define turn_sound_off()    {}
-#endif
 
 // Filesystem-variables:
 extern FATFS       fs;             // filesystem handle - only created once
