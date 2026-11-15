@@ -1,8 +1,9 @@
 """Build doc/flux-mod-1541-II.pdf: step-by-step instructions with large pictures for the
 1541-FluxPico flux mod (PCB v1.7 in a 1541-II with the 40-pin 251828 gate array).
 
-Board drawings come from the KiCad PCB file (pcb.py / figs.py); the gate array pins from the
-251828 (64H156) 40-pin pinout; the photo is from doc/pictures.
+Pad positions come from the KiCad PCB file (pcb.py / figs.py); the gate array pins from the
+251828 (64H156) 40-pin pinout; the photos of the drive board and of the user's rePico v1.7 are
+from doc/pictures.
 """
 import os
 
@@ -16,7 +17,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
 
-from figs import B, View, _xy, board_drawing
+from figs import B
 
 REPO = r'E:\GitHub\1541-rePico'
 OUT = os.environ.get('PDF_OUT', os.path.join(REPO, 'doc', 'flux-mod-1541-II.pdf'))
@@ -158,29 +159,136 @@ def fig_clip_leg():
 
 # --- rePico board ---------------------------------------------------------------
 
-def fig_repico_bottom():
-    bx0, by0, bx1, by1 = B.outline
-    v = View(bx0, by0, bx1, by1, 165 * mm, bottom=True)
-    labels = [('P1', 19, C_CUT, 'P1 pin 19: CLIP', -50, -75),
-              ('P2', 19, C_CUT, 'P2 pin 19: CLIP', 30, -60),
-              ('IC1', 19, C_A, 'A: VIA pin 19 (MODE)', 60, -112),
-              ('IC1', 39, C_B, 'B: VIA pin 39 (SOE)', 30, 40),
-              ('U1', 5, C_C, 'C: Pico pin 5 (GP3)', -20, -150),
-              ('Q1', 3, C_CUT, 'Q1: lift leg 3', 70, -45)]
-    return board_drawing(v, 'B.Cu', labels, None, title='rePico v1.7, BOTTOM side (as you see it upside down)',
-                         parts=('IC1', 'P1', 'P2', 'U1', 'Q1'), lsize=11)
+# Photos of the user's own rePico v1.7 (doc/pictures, 2400 x 3200). All positions below are in
+# "photo units": the photo scaled to 900 x 1200. Each photo is matched to the KiCad board by four
+# VIA socket pads (a perspective transform), so every mark sits on the pad from the PCB file.
+PHOTO_BOTTOM = os.path.join(REPO, 'doc', 'pictures', 'repico_v17_bottom.jpg')
+PHOTO_TOP = os.path.join(REPO, 'doc', 'pictures', 'repico_v17_top.jpg')
+CAL_BOTTOM = [(('IC1', 20), (440, 212)), (('IC1', 1), (440, 855)), (('IC1', 21), (640, 212)),
+              (('IC1', 40), (640, 855))]
+CAL_TOP = [(('IC1', 20), (521, 386)), (('IC1', 1), (522, 836)), (('IC1', 21), (371, 384)),
+           (('IC1', 40), (374, 833))]
+# the plug pins stand ~10 mm off the board and lean in the photo (perspective): their marks go on
+# the pin tips, matched by the tips of the four end pins
+CAL_BOTTOM_TIPS = [(('P1', 20), (398, 183)), (('P1', 1), (388, 916)), (('P2', 1), (627, 183)),
+                   (('P2', 20), (615, 913))]
+PLUG_PINS = ('P1', 'P2')
+
+P_RED, P_BLUE, P_ORANGE = (215, 0, 0), (0, 85, 225), (225, 110, 0)
+P_PURPLE, P_GREY, P_GREEN = (175, 0, 130), (70, 70, 70), (20, 120, 30)
 
 
-def fig_q1_zoom():
-    v = View(118.0, 69.5, 134.5, 80.5, 160 * mm, bottom=True)
-    labels = [('Q1', 3, C_CUT, 'Q1 leg 3 (alone): LIFT', 70, -55),
-              ('Q1', 2, C_GND, 'Q1 leg 2: beeps to GND', -70, -30),
-              ('Q1', 1, C_A, 'Q1 leg 1', -70, 12),
-              ('Q6', 3, colors.HexColor('#666666'), 'Q6: do NOT touch', -50, 40),
-              ('IC1', 19, C_A, 'VIA pin 19 (MODE)', 25, -95),
-              ('P1', 19, C_CUT, 'P1 pin 19', 15, -45)]
-    return board_drawing(v, 'B.Cu', labels, None, title='Zoom, BOTTOM side: Q1 next to the VIA socket',
-                         parts=('IC1', 'P1', 'Q1', 'Q6', 'R4', 'R14'), lsize=11)
+def _homography(cal):
+    import numpy as np
+    rows = []
+    for (ref, num), (u, v) in cal:
+        p = B.pad(ref, num)
+        x, y = p['x'], p['y']
+        rows.append([x, y, 1, 0, 0, 0, -u * x, -u * y, -u])
+        rows.append([0, 0, 0, x, y, 1, -v * x, -v * y, -v])
+    h = np.linalg.svd(np.array(rows))[2][-1]
+    h = h.reshape(3, 3) / h[-1]
+
+    def to_photo(ref, num):
+        p = B.pad(ref, num)
+        q = h @ [p['x'], p['y'], 1]
+        return q[0] / q[2], q[1] / q[2]
+    return to_photo
+
+
+def photo_figure(src, cal, crop, marks, boxes, text_h, name, tips=None):
+    """marks: (ref, pin, colour, text, label_x, label_y): ring on the pad (on the tip for a plug pin
+    when tips is given), label with a leader line.
+    boxes: (refs, colour, text, label_x, label_y): frame around the pads of parts, label next to it.
+    crop and label positions in photo units; text_h: letter height in photo units."""
+    os.makedirs(TMP, exist_ok=True)
+    im = PImage.open(src).convert('RGB')
+    s = im.width / 900.0
+    dr = ImageDraw.Draw(im)
+    f = ImageFont.truetype('C:/Windows/Fonts/arialbd.ttf', int(text_h * s))
+    lw = max(3, int(text_h * s / 9))
+    at = _homography(cal)
+    at_tip = _homography(tips) if tips else None
+
+    def label(x, y, txt, col, to):
+        x, y = x * s, y * s
+        tw = dr.textlength(txt, font=f)
+        pad = text_h * s * 0.25
+        bx = (x - pad, y - pad, x + tw + pad, y + text_h * s * 1.15 + pad)
+        # leader from the nearest box edge to the target
+        tx, ty = to[0] * s, to[1] * s
+        cx, cy = min(max(tx, bx[0]), bx[2]), min(max(ty, bx[1]), bx[3])
+        dr.line((cx, cy, tx, ty), fill=col, width=lw)
+        dr.rectangle(bx, fill='white', outline=col, width=lw)
+        dr.text((x, y), txt, fill=col, font=f)
+
+    for ref, num, col, txt, lx, ly in marks:
+        u, v = (at_tip if at_tip and ref in PLUG_PINS else at)(ref, num)
+        r = 11 * s
+        if at_tip and ref in PLUG_PINS:
+            # the visible pin: a line from the top of the black plastic (about halfway between the
+            # board and the tip in the photo) to the tip
+            bu, bv = at(ref, num)
+            bu, bv = bu + 0.45 * (u - bu), bv + 0.45 * (v - bv)
+            dr.line((bu * s, bv * s, u * s, v * s), fill=col, width=int(lw * 2.2))
+            r = 7 * s
+        dr.ellipse((u * s - r, v * s - r, u * s + r, v * s + r), outline=col, width=int(lw * 1.6))
+        if txt:
+            label(lx, ly, txt, col, (u + (lx > u and 11 or -11) * 0.7, v))
+    for parts, col, txt, lx, ly in boxes:
+        pts = [at(ref, p['num']) for ref in parts for p in B.footprints[ref]['pads']]
+        x0, y0 = min(p[0] for p in pts) - 10, min(p[1] for p in pts) - 9
+        x1, y1 = max(p[0] for p in pts) + 10, max(p[1] for p in pts) + 9
+        dr.rectangle((x0 * s, y0 * s, x1 * s, y1 * s), outline=col, width=int(lw * 1.6))
+        label(lx, ly, txt, col, (x1 if lx > x1 else x0, (y0 + y1) / 2))
+    out = os.path.join(TMP, name)
+    c = im.crop(tuple(int(v * s) for v in crop))
+    c.save(out, quality=88)
+    return out, c.size
+
+
+def photo_top():
+    marks = [('U1', 1, P_GREY, 'Pico pin 1', 640, 300),
+             ('U1', 5, P_PURPLE, 'Pico pin 5 (wire C)', 640, 520),
+             ('IC1', 1, P_GREY, 'VIA pin 1', 560, 905)]
+    boxes = []
+    return photo_figure(PHOTO_TOP, CAL_TOP, (230, 280, 900, 960), marks, boxes, 20, 'repico_top.jpg')
+
+
+def photo_bottom():
+    marks = [('P1', 19, P_RED, 'CLIP', 230, 112),
+             ('IC1', 19, P_BLUE, 'wire A', 480, 112),
+             ('U1', 5, P_PURPLE, 'wire C', 120, 400),
+             ('P2', 19, P_RED, 'CLIP', 450, 985),
+             ('IC1', 39, P_ORANGE, 'wire B', 690, 770)]
+    boxes = [(('Q1',), P_RED, 'Q1: REMOVE', 600, 420)]
+    return photo_figure(PHOTO_BOTTOM, CAL_BOTTOM, (30, 95, 860, 1020), marks, boxes, 19, 'repico_bottom.jpg',
+                        CAL_BOTTOM_TIPS)
+
+
+def photo_zoom_q1():
+    marks = [('P1', 20, P_GREY, 'top plug pin', 290, 150),
+             ('P1', 19, P_RED, 'CLIP', 300, 250),
+             ('IC1', 20, P_GREY, '+5V (VIA 20)', 470, 150),
+             ('IC1', 19, P_BLUE, 'wire A', 395, 395),
+             ('U1', 1, P_GREY, 'Pico pin 1', 210, 205),
+             ('U1', 5, P_PURPLE, 'wire C (Pico pin 5)', 205, 300),
+             ('Q1', 2, P_GREEN, 'leg 2 = GND', 470, 395),
+             ('Q1', 3, P_RED, 'leg 3', 545, 345)]
+    boxes = [(('Q1',), P_RED, 'Q1: REMOVE', 548, 310),
+             (('Q6',), P_GREY, 'Q6: do not touch', 548, 263),
+             (('Q8',), P_GREY, 'Q8: do not touch', 548, 216)]
+    return photo_figure(PHOTO_BOTTOM, CAL_BOTTOM, (195, 140, 660, 420), marks, boxes, 10, 'repico_zoom_q1.jpg',
+                        CAL_BOTTOM_TIPS)
+
+
+def photo_zoom_p2():
+    marks = [('P2', 20, P_GREY, 'bottom plug pin', 450, 900),
+             ('P2', 19, P_RED, 'CLIP', 500, 745),
+             ('IC1', 39, P_ORANGE, 'wire B', 680, 745),
+             ('IC1', 1, P_GREY, 'GND (VIA 1)', 380, 960)]
+    return photo_figure(PHOTO_BOTTOM, CAL_BOTTOM, (360, 720, 780, 1000), marks, [], 10, 'repico_zoom_p2.jpg',
+                        CAL_BOTTOM_TIPS)
 
 
 def fig_header_clip():
@@ -202,10 +310,9 @@ def fig_header_clip():
                 d.add(Line(x - 14, 90 + dy * 2, x + 14, 90 + dy * 2, strokeColor=C_CUT, strokeWidth=2))
             d.add(Line(x + 14, 90, x + 40, 66, strokeColor=C_CUT, strokeWidth=1.2))
             tag(d, x + 40, 60, 'cut flush', C_CUT, 11)
-            text(d, x, 8, '19', 12, C_CUT, 'middle')
+            text(d, x, 8, 'CLIP', 11, C_CUT, 'middle')
         else:
             d.add(Rect(x - 3, 20, 6, 76, fillColor=col, strokeColor=C_TEXT, strokeWidth=0.4))
-            text(d, x, 8, str(12 + k), 10, C_TEXT, 'middle', bold=False)
     text(d, 70 + 8 * 36 + 14, 8, '<- end of the row', 10, C_TEXT, 'start', bold=False)
     return d
 
@@ -219,9 +326,9 @@ def fig_wiring():
     text(d, lx + lw / 2, 164, 'rePico (bottom)', 13, C_EDGE, 'middle')
     d.add(Rect(gx, 20, gw, 160, fillColor=colors.HexColor('#EEEEEE'), strokeColor=C_TEXT, strokeWidth=1.5))
     text(d, gx + gw / 2, 164, 'gate array 251828', 13, C_TEXT, 'middle')
-    for y, col, a, b, name in ((130, C_A, 'VIA pin 19', 'pin 19 (OE)', 'A'),
-                               (90, C_B, 'VIA pin 39', 'pin 39 (SOE)', 'B'),
-                               (50, C_C, 'Pico pin 5', 'pin 31 (CLR)', 'C')):
+    for y, col, a, b, name in ((130, C_A, 'mark "wire A"', 'pin 19 (OE)', 'A'),
+                               (90, C_B, 'mark "wire B"', 'pin 39 (SOE)', 'B'),
+                               (50, C_C, 'mark "wire C"', 'pin 31 (CLR)', 'C')):
         text(d, lx + 10, y - 4, a, 12.5, col)
         text(d, gx + 10, y - 4, b, 12.5, col)
         d.add(Line(lx + lw, y, gx, y, strokeColor=col, strokeWidth=3))
@@ -355,16 +462,17 @@ def build():
     s.append(table([
         ['where', 'what', 'step'],
         ['drive main board', 'cut leg 31 of the gate array, solder wire C to it', '2'],
-        ['rePico, bottom', 'clip two plug pins: P1 pin 19 and P2 pin 19', '3'],
-        ['rePico, bottom', 'lift one leg of the small transistor Q1', '4'],
+        ['rePico, bottom', 'clip two plug pins (red CLIP in the photos)', '3'],
+        ['rePico, bottom', 'remove the small transistor Q1', '4'],
         ['rePico -> gate array', 'three wires: A (MODE), B (SOE), C (flux)', '5']],
         [44 * mm, 100 * mm, 20 * mm]))
     s.append(Spacer(1, 8))
     s.append(P('<b>The buzzer stays.</b> No level shifter module and no extra parts are needed.', BODY))
-    s.append(P('<b>After the mod, never run the old rePico firmware.</b> The port A buffer then always sends the '
-               'drive data to the Pico, while the old firmware also drives those Pico pins: both would push '
-               'against each other. Flash the FluxPico firmware <b>before</b> you plug the modified board in.',
-               WARN))
+    s.append(P('<b>After the mod, never run the old rePico firmware.</b> It drives port A, SYNC and BYTE READY '
+               'itself, but after the mod the gate array drives those lines: both would push against each other. '
+               'It would also send its old SOE signal on GP3, which is now wired to the CLR input of the gate array. '
+               'Flash the FluxPico firmware <b>before</b> you plug the modified board in. To go back to the old '
+               'firmware, Q1 has to be put back and the mod undone.', WARN))
 
     s.append(PageBreak())
     s.append(P('Before you start', H2))
@@ -374,7 +482,7 @@ def build():
         ['soldering iron, thin solder', ''],
         ['small flush cutters', 'for the plug pins and the gate array leg'],
         ['thin insulated wire, about 50 cm', 'wire-wrap wire (0.25 mm) is ideal; three colours help'],
-        ['tweezers or a needle', 'to lift Q1\'s leg'],
+        ['tweezers', 'to take Q1 off'],
         ['magnifier or phone camera', 'take a close photo and zoom in on the screen to check your work']],
         [70 * mm, 94 * mm]))
     s.append(Spacer(1, 8))
@@ -430,6 +538,9 @@ def build():
     s.append(P('All seven beep? Then pin 31 is the one between pin 30 (+5V) and pin 32 (GND). If the chip has '
                '42 pins instead of 40, or a check fails: stop and send a photo, the numbers are then different.',
                NOTE))
+    s.append(P('<b>One more check before you cut:</b> pin 31 to pin 30 (+5V): <b>no beep</b>. Pin 31 to pin 32 '
+               '(GND): <b>no beep</b>. If pin 31 beeps to either, it is the wrong leg: stop and send a photo.',
+               BODY))
 
     s.append(P('Step 2: disconnect gate array pin 31', H2))
     s.append(P('Pin 31 (CLR) gets the read pulses from the read amplifier U12. From now on it gets them from the '
@@ -449,48 +560,70 @@ def build():
     s.append(PageBreak())
     s.append(P('Step 3: clip two plug pins on the rePico', H2))
     s.append(P('The rePico plugs into the VIA socket with two rows of pins, <b>P1</b> (VIA pins 1-20) and '
-               '<b>P2</b> (VIA pins 21-40). Pin 19 of each row must no longer reach the socket: P1 pin 19 ties '
-               'MODE to GND, P2 pin 19 is the Pico\'s copy of SOE. Wires A and B take their place.', BODY))
-    s.append(fig_repico_bottom())
-    s.append(P('Figure 5: rePico bottom side. Red: the two pins to clip and Q1. Blue/orange/purple: the start of '
-               'wires A, B and C.', CAP))
+               '<b>P2</b> (VIA pins 21-40). One pin of each row (red <b>CLIP</b> in the photos) must no longer '
+               'reach the socket: one ties MODE to GND, the other carries the Pico\'s copy of SOE. Wires A and B '
+               'take their place.', BODY))
+    tp, (tw, th) = photo_top()
+    s.append(Image(tp, width=120 * mm, height=120 * mm * th / tw))
+    s.append(P('Figure 5: your rePico, TOP side (VIA chip and Pico). Turn it over like the page of a book, '
+               'left to right: then the Pico is on the LEFT, as in figure 6. The USB socket of the Pico stays at '
+               'the top.', CAP))
+
+    s.append(PageBreak())
+    bp, (bw, bh) = photo_bottom()
+    s.append(Image(bp, width=150 * mm, height=150 * mm * bh / bw))
+    s.append(P('Figure 6: your rePico, BOTTOM side, Pico socket on the left. Red: the two plug pins to clip (CLIP) and Q1. '
+               'Blue, orange, purple: where wires A, B and C start. The long gold pins are the plug pins: their '
+               'black plastic strip sits on the board.', CAP))
+
+    s.append(PageBreak())
+    zp, (zw, zh) = photo_zoom_q1()
+    s.append(Image(zp, width=165 * mm, height=165 * mm * zh / zw))
+    s.append(P('Figure 7: zoom of figure 6, top end. CLIP: the second plug pin from the top, left row. Q1 is the '
+               'lowest of the three small transistors.', CAP))
+    zp, (zw, zh) = photo_zoom_p2()
+    s.append(Image(zp, width=150 * mm, height=150 * mm * zh / zw))
+    s.append(P('Figure 8: zoom of figure 6, bottom end. CLIP: the second plug pin from the bottom, right row.', CAP))
 
     s.append(PageBreak())
     s.append(fig_header_clip())
-    s.append(P('Figure 6: side view of a plug pin row. Pin 19 is the second pin from the pin 20 end.', CAP))
-    s.append(P('1. Find P1 and P2 in figure 5. The two rows are numbered in opposite directions: P1 pin 20 and '
-               'P2 pin 20 are at opposite ends. Pin 19 is <b>the second pin from the pin 20 end</b>.', STEP))
-    s.append(P('2. Check before you cut: P1 pin 20 beeps to VIA socket pin 20 on the rePico, and P1 pin 19 beeps '
-               'to GND (VIA socket pin 1). P2 pin 20 beeps to VIA socket pin 40; P2 pin 19 is the one next to it.',
-               STEP))
+    s.append(P('Figure 9: side view of a plug pin row. The CLIP pin is the second pin from the end of the row.', CAP))
+    s.append(P('1. Find the two red <b>CLIP</b> pins: in the left row of plug pins the second from the <b>top</b> '
+               '(figure 7), in the right row the second from the <b>bottom</b> (figure 8).', STEP))
+    s.append(P('2. Check before you cut: the top CLIP pin <b>beeps to GND</b> (the pad marked GND in figure 8). '
+               'The top plug pin above it beeps to the pad marked +5V in figure 7.', STEP))
     s.append(P('3. Cut each pin <b>flush with the black plastic</b>, so nothing sticks out to enter the socket.',
                STEP))
 
     s.append(PageBreak())
-    s.append(P('Step 4: lift Q1\'s single leg', H2))
+    s.append(P('Step 4: remove Q1', H2))
     s.append(P('Q1 turns the port A buffer (74LVC4245) around whenever the drive reads. In flux mode the gate '
-               'array drives port A, so the buffer must always listen. With Q1\'s leg 3 off, a resistor (R4) holds '
+               'array drives port A, so the buffer must always listen. With Q1 gone, a resistor (R4) holds '
                'it in "listen" mode.', BODY))
-    s.append(fig_q1_zoom())
-    s.append(P('Figure 7: Q1 is the small 3-leg transistor next to the VIA socket. Q6, just above it, looks the '
-               'same: do not touch it.', CAP))
+    zp, (zw, zh) = photo_zoom_q1()
+    s.append(Image(zp, width=165 * mm, height=165 * mm * zh / zw))
+    s.append(P('Figure 7 again: Q1 in the red frame.', CAP))
+    s.append(P('Q1 is the lowest of the three small transistors between the two plug pin rows, next to the print '
+               '"R13". Q6 and Q8 above it look the same: do not touch them.', BODY))
     s.append(P('1. Find Q1 (figure 7). It has two legs on one side and <b>one leg alone</b> on the other side: '
                'that one is leg 3.', STEP))
-    s.append(P('2. Check: one of the two legs on the other side (leg 2) <b>beeps to GND</b>. Q6 has no leg on GND: '
-               'if nothing beeps to GND, you have the wrong transistor.', STEP))
-    s.append(P('3. Heat leg 3 with the iron and lift it gently with a needle or tweezers, about 0.5 mm, so it does '
-               'not touch its pad any more. (Removing Q1 completely is also fine.)', STEP))
-    s.append(P('4. Check: leg 3 to its pad: no beep.', STEP))
+    s.append(P('2. Check: one of the two legs on the other side (leg 2) <b>beeps to GND</b> (VIA socket pin 1, '
+               'figure 8). Q6 and Q8 have no leg on GND: if nothing beeps to GND, you have the wrong transistor.', STEP))
+    s.append(P('3. Put a big blob of fresh solder over all three legs, so one touch of the iron melts them all. '
+               'Keep the iron on the blob and push Q1 off with tweezers. Clean the pads with solder wick, so no '
+               'solder joins two pads.', STEP))
+    s.append(P('4. Check: the single pad (where leg 3 was) to each of the other two pads: <b>no beep</b>. '
+               '(Lifting only leg 3 off its pad also works, but taking Q1 off is easier to get right.)', STEP))
 
     s.append(PageBreak())
     s.append(P('Step 5: three wires', H2))
     s.append(fig_wiring())
-    s.append(P('Figure 8: the three wires.', CAP))
+    s.append(P('Figure 10: the three wires.', CAP))
     s.append(table([
-        ['wire', 'on the rePico (bottom side, figure 5)', 'on the gate array'],
-        ['A (MODE)', 'VIA socket pin 19 (the socket pad, not the clipped pin)', 'pin 19'],
-        ['B (SOE)', 'VIA socket pin 39', 'pin 39'],
-        ['C (flux)', 'Pico socket pin 5 (GP3)', 'pin 31 (the cut leg, on the chip)']],
+        ['wire', 'on the rePico (bottom side, figures 6-8)', 'on the gate array'],
+        ['A (MODE)', 'pad marked "wire A" (figure 7), not the clipped pin', 'pin 19'],
+        ['B (SOE)', 'pad marked "wire B" (figure 8)', 'pin 39'],
+        ['C (flux)', 'pad marked "wire C" (figure 7, Pico pin 5)', 'pin 31 (the cut leg, on the chip)']],
         [26 * mm, 88 * mm, 50 * mm]))
     s.append(Spacer(1, 8))
     s.append(P('Solder to the top of the gate array legs (where they leave the chip). Keep the wires flat on the '
@@ -501,11 +634,11 @@ def build():
     s.append(P('Step 6: final checks (drive unplugged, Pico out)', H2))
     s.append(table([
         ['measure', 'expected'],
-        ['VIA socket pin 19 on the rePico  ->  gate array pin 19', 'beep (wire A)'],
-        ['VIA socket pin 39 on the rePico  ->  gate array pin 39', 'beep (wire B)'],
-        ['Pico socket pin 5  ->  gate array leg 31', 'beep (wire C)'],
+        ['rePico pad "wire A"  ->  gate array pin 19', 'beep'],
+        ['rePico pad "wire B"  ->  gate array pin 39', 'beep'],
+        ['rePico pad "wire C"  ->  gate array leg 31', 'beep'],
         ['gate array leg 31  ->  its stub on the board', 'no beep'],
-        ['VIA socket pin 19  ->  GND', 'no beep (was GND before)'],
+        ['rePico pad "wire A"  ->  GND', 'no beep (was GND before)'],
         ['wire A, B, C  ->  each other and GND', 'no beep'],
         ['+5V  ->  GND', 'no beep']],
         [110 * mm, 54 * mm]))
@@ -519,9 +652,9 @@ def build():
     s.append(table([
         ['change', 'reason'],
         ['gate array pin 31 cut', 'the read amplifier U12 would fight the Pico\'s pulses'],
-        ['P1 pin 19 clipped, wire A', 'the rePico tied MODE to GND, which kept the gate array switched off'],
-        ['P2 pin 19 clipped, wire B', 'the gate array needs the real SOE from the VIA; it frees the Pico pin GP3'],
-        ['Q1 leg lifted', 'the port A buffer must only listen; the gate array drives port A now'],
+        ['first CLIP pin, wire A', 'the rePico tied MODE to GND, which kept the gate array switched off'],
+        ['second CLIP pin, wire B', 'the gate array needs the real SOE from the VIA; it frees the Pico pin GP3'],
+        ['Q1 removed', 'the port A buffer must only listen; the gate array drives port A now'],
         ['wire C from Pico GP3', 'the flux pulses (3.3 V is enough for the gate array input)']],
         [52 * mm, 112 * mm]))
 

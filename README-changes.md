@@ -1,6 +1,9 @@
 # 1541-FluxPico – changes from 1541-rePico: bit-level G64 emulation and more
 
-This document describes a set of changes to the firmware (not yet committed):
+This document describes the byte-level firmware changes this fork started with. They are
+committed, and this playback is still built with `-D FLUX_MODE=OFF` for an unmodified board. The
+default build is now the flux mode (see [README.md](README.md#project-status) and
+[doc/bitstream-plan.md](doc/bitstream-plan.md)), which is **not tested on hardware yet**.
 
 1. **Bit-level G64 emulation**: copy-protected G64 images are fed to the drive the way a real 1541 reads them
 2. **Half-track support** (e.g. *Bounty Bob Strikes Back*)
@@ -12,8 +15,8 @@ This document describes a set of changes to the firmware (not yet committed):
 8. **Density rules per image** (`<image>.den`) for loaders that read tracks at another density
 9. **Debug log on USB serial** (build option `DEBUG_DRIVE_LOG`)
 
-Status: tested on the PC (host tests, see below) and on the hardware (PCB v17): *Bounty Bob Strikes
-Back* loads. *Law of the West* needs a `.den` file (section 8); the hardware test of that is pending.
+Status of the byte-level firmware: tested on the PC (host tests, see below) and on the hardware
+(PCB v17): *Bounty Bob Strikes Back* loads. *Law of the West* needs a `.den` file (section 8); the hardware test of that is pending.
 See the [hardware test list](#hardware-test-list).
 
 ---
@@ -114,7 +117,7 @@ While reading, `S:` therefore counts through the sectors under the head. Writes 
 
 * New entry in the Settings menu: **`Beeper      On`/`Off`**. It switches the stepper sound of the
   buzzer. Switching it off silences a sound that is already playing.
-* Only on PCB v17 and later (PCB v16 has no buzzer, so the entry is not shown there).
+* Uses the buzzer of PCB v1.7 (the only board this fork supports).
 * The default is **On**, as before. The setting is **stored in flash** (`src/settings.c`): last 4 KB
   sector, magic + version + checksum, written only when a value changes. Flashing a new UF2 keeps it.
   The save runs on core0 with `flash_safe_execute()` (core1 is parked for about 50 ms; the disk
@@ -314,8 +317,7 @@ compatible with this project's GPLv3). The authors are credited in the file.
 
 Test firmware (not in git, see `.gitignore`):
 
-* `firmware/build-hwtest/1541-rePico_pcb17.uf2` for PCB v17 (default)
-* `firmware/build-hwtest/1541-rePico_pcb16.uf2` for PCB v16 (legacy)
+* `firmware/build-hwtest/1541-rePico_pcb17.uf2` for PCB v17
 
 These were built locally with the Arm GNU Toolchain 14.2.1 and pico-sdk 2.3.1 (CI uses the newest
 SDK). The C64 programs come from the committed `.prg` files: assembling `menu.asm` at the current

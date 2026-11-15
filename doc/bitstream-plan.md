@@ -17,13 +17,16 @@ on the drive's main board, and these differ per drive model. The first target is
 
 ## How the 1541-II reads today (schematic 340503)
 
-* **U12** (CX20185 R/W hybrid) amplifies the head signal. Its pin 33 *Read Data* goes straight to the
-  gate array **U10 pin 33 (CLR)**: every flux reversal restarts the bit-cell counters.
+Gate array pins below are for the 40-pin 251828 of the 1541-II (the schematic uses the 42-pin
+numbering: CLR 33, B 40, SOE 41, BYTE 42).
+
+* **U12** (CX20185 R/W hybrid) amplifies the head signal. Its *Read Data* output goes straight to the
+  gate array **U10 pin 31 (CLR)**: every flux reversal restarts the bit-cell counters.
 * **U10** (251828 gate array) decodes with the 16 MHz clock and the density from DS0/DS1 (pins
-  15/16), gives SYNC (pin 17 -> VIA PB7), the byte (YB0-7 -> VIA PA) and BYTE READY (pin 42 -> VIA CA1
+  15/16), gives SYNC (pin 17 -> VIA PB7), the byte (YB0-7 -> VIA PA) and BYTE READY (pin 40 -> VIA CA1
   and the 6502 SO pin). Its **pin 19 (OE)** is the VIA's CB2 (MODE): high = read (drives PA),
-  low = write. **Pin 41** is SOE (VIA CA2).
-* Writing: the gate array's **pin 40 (B)** changes level for every flux reversal to be written; U11
+  low = write. **Pin 39** is SOE (VIA CA2).
+* Writing: the gate array's **pin 38 (B)** changes level for every flux reversal to be written; U11
   (LS86) and U14 (LS14) turn the edges into pulses for U12 *Write Data* (pin 29).
 
 ## How the rePico board (v1.7) keeps the gate array out today
@@ -59,15 +62,20 @@ BYTE = pin 40 (the schematic shows the 42-pin numbering, CLR = 33).
 |---|---|---|
 | 1 | Gate array pin 31 (CLR): cut the leg near the board, wire C to the leg | U12's Read Data would fight the Pico |
 | 2 | rePico: clip plug pins P1.19 and P2.19 flush | P1.19 tied MODE to GND; P2.19 carried the Pico's SOE_GA |
-| 3 | rePico: lift Q1 leg 3 (drain) | Q1 turned the 74LVC4245 towards the VIA in read mode; with it off, R4 (1M to 5V) keeps DIR high = VIA -> Pico, so the gate array can drive port A |
+| 3 | rePico: remove Q1 (lifting only leg 3, the drain, also works) | Q1 turned the 74LVC4245 towards the VIA in read mode; with it off, R4 (1M to 5V) keeps DIR high = VIA -> Pico, so the gate array can drive port A |
 | 4 | wire A: VIA socket pin 19 (MODE) -> gate array pin 19 | |
 | 5 | wire B: VIA socket pin 39 (SOE) -> gate array pin 39 | frees GPIO3 |
 | 6 | wire C: Pico pin 5 (GP3) -> gate array pin 31 | flux pulses, 3.3 V push-pull (no level shifter) |
 
 The buzzer stays. **After the mod the old firmware must not run**: the 74LVC4245 then always drives
-GPIO8-15, and the old firmware drives them too.
+GPIO8-15, which the old firmware drives too; it also drives SYNC and BYTE READY against the gate
+array, and toggles GP3 (now CLR) as SOE_GA. Going back needs Q1 refitted and the mod undone.
 
 ## Firmware status (milestone 1, `FLUX_MODE`, on by default)
+
+**Not tested on hardware yet**: the board mod has not been done on a real drive. The mod
+instructions (`doc/flux-mod-1541-II.pdf`) were reviewed against the PCB files and the gate array
+pinout, and have photos of a v1.7 board.
 
 Done in `firmware/src/flux.c` (math in `include/flux_math.h`, host test `tests/flux_math_test.c`):
 
@@ -114,7 +122,7 @@ probably still fail; per-byte speed maps; a menu entry to repeat the calibration
 
 1. normal D64 load/save/format, all zones
 2. Bounty Bob (half-tracks), Law of the West (no `.den`), Defender of the Crown (V-Max)
-3. logic analyser: BYTE READY spacing from the gate array, pulses on U10 pin 33
+3. logic analyser: BYTE READY spacing from the gate array, pulses on U10 pin 31 (CLR)
 4. host tests: flux generation from G64 checked against the VICE read model (`gcr_resample`)
 
 ## Phase 5 - new PCB version

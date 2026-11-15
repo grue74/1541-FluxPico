@@ -4,10 +4,27 @@ replacement of analog-part of Commodore 1541-Floppy devices based on Pi-Pico(2)
 **1541-FluxPico is a fork of [1541-rePico](https://github.com/fook42/1541-rePico) by F00K42 and PeiselUlli.**
 It keeps the plug-in board (VIA socket) but changes how disks are played: tracks are held as flux
 streams and the Pico sends them as pulses into the drive's own read circuit (the gate array), which
-decodes them at the density the drive selects. Work in progress, see
-[doc/bitstream-plan.md](doc/bitstream-plan.md), [README-changes.md](README-changes.md) and the board
-mod for the 1541-II in [doc/flux-mod-1541-II.pdf](doc/flux-mod-1541-II.pdf). Licensed under GPL-3.0
-like the original.
+decodes them at the density the drive selects. Licensed under GPL-3.0 like the original.
+
+## Project status ##
+
+**Work in progress. The flux mode has NOT been tested on hardware yet**: the board mod has not been
+done on a real drive so far.
+
+| Part | State |
+|---|---|
+| Board | rePico **PCB v1.7 only** (the v1.6 design and build were removed from this fork) |
+| Drive | **1541-II** (ASSY 340503, 40-pin gate array 251828) first; 1541-I boards later |
+| Board mod | instructions ready: [doc/flux-mod-1541-II.pdf](doc/flux-mod-1541-II.pdf), with photos of a v1.7 board: one cut leg on the gate array, two clipped plug pins and Q1 removed on the rePico, three wires. Reviewed against the PCB files and the gate array pinout; **not done on a real drive yet** |
+| Flux firmware | milestone 1 written (`FLUX_MODE`, on by default): tracks played as flux pulses on GP3 into the gate array, pulse shape calibrated at start, writes captured at BYTE READY. Host tests pass; **not tested on hardware** |
+| Byte-level firmware | the earlier bit-level G64 playback ([README-changes.md](README-changes.md)), built with `-D FLUX_MODE=OFF` for an **unmodified** board; tested on hardware (*Bounty Bob Strikes Back* loads) |
+
+Not done yet: random flux in no-flux areas (weak bits, needed for RapidLok and V-Max), per-byte speed
+maps, a menu entry to repeat the calibration. Plan and details:
+[doc/bitstream-plan.md](doc/bitstream-plan.md).
+
+**Never run the old rePico firmware (or a `FLUX_MODE=OFF` build) on a modified board**: it drives
+lines that the gate array drives after the mod.
 
 The rest of this README is from 1541-rePico.
 
@@ -119,7 +136,7 @@ prepare build-folder / configure Ninja for build the cmake project
 cd firmware
 mkdir build
 cd build
-cmake .. -D BUILD_MENUPRG=OFF -D COMPRESS_MENUPRG=ON -D PCB_VERSION=17
+cmake .. -D BUILD_MENUPRG=OFF -D COMPRESS_MENUPRG=ON
 ```
 
 optional cmake variables are:
@@ -129,7 +146,7 @@ optional cmake variables are:
 | BUILD_MENUPRG | ON*/OFF | let ACME compile the provided menu.asm-code. Otherwise the shipped, precompiled "menu.prg" will be used. |
 | BUILD_SELECTORPRG | ON*/OFF | let PETCAT convert the boot-selector basic code to PRG. Otherwise the shipped, precompiled "selector.prg" will be used. |
 | COMPRESS_MENUPRG | ON*/OFF | uses dali binary compression to generate a smaller menu-prg object |
-| PCB_VERSION | 0..17* | defines which PCB version is used -> enables specific code features according to pcb-layout (like sound output) |
+| FLUX_MODE | ON*/OFF | ON: flux pulses into the drive's gate array, needs the [board mod](doc/flux-mod-1541-II.pdf). OFF: byte-level playback for an unmodified board |
 
 (* is default)
 
